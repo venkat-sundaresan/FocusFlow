@@ -94,6 +94,74 @@ The reusable Python API is `focusflow.ml.model.MotionClassifier(model_dir).predi
 `velocity` has shape `(N, 2, 120)` in logical pixels per second sampled at 60 Hz; `read_windows` in
 `focusflow.ml.data` performs the CSV preprocessing. Load once and run outside the mouse-hook thread.
 
+### Separate synthetic stress evaluation
+
+`generate-stress` adds twelve harder scenario families: sensor noise, slow drift, correlated noise,
+noise bursts, intentional movement with oscillations, curved movement, deliberate corrections,
+stop-start movement, low-amplitude tremor-like oscillations, variable-frequency chirps, mixed
+frequencies, and amplitude modulation. All sessions include randomized parameters, orientation, and
+display scale. Each session has an independent deterministic random stream; seed/index IDs have a
+separate `stress-v1` namespace. Reusing a seed intentionally reproduces the same sessions, not new data.
+The `scenario` CSV column is audit metadata and never enters the feature vectors.
+
+```sh
+.venv-ml/bin/python -m focusflow.ml generate-stress --output data/ml/stress-v1.csv --groups 240 --seed 2026
+.venv-ml/bin/python -m focusflow.ml evaluate-stress --data data/ml/stress-v1.csv --reference-data data/ml/demo.csv --model artifacts/motion-demo --output artifacts/motion-stress-v1 --seed 42
+.venv-ml/bin/python -m focusflow.ml predict --data data/ml/stress-v1.csv --model artifacts/motion-stress-v1/model --output artifacts/motion-stress-v1/reloaded-predictions.json
+```
+
+Use fresh output paths for another run: generation and evaluation reject existing outputs. Neither
+command modifies the demo dataset or bundled model. If the original demo CSV is unavailable, reproduce
+it with `generate-demo --groups 90 --seed 42` at a new path and pass that as `--reference-data`.
+The evaluator verifies its SHA-256 against the original training report. Since the old feature baseline
+was not saved, it reconstructs that head using **only the original recorded training groups** and
+checks that its original held-out accuracy and macro-F1 reproduce the saved report. The original
+Chronos head is loaded as saved. Original and challenge dataset IDs must not overlap.
+
+Stress sessions are split approximately **60% training / 20% validation / 20% challenge-test**, stratified
+by class and grouped by participant ID. All windows from a session and all sessions from a participant
+stay in one partition. At least five independent groups per class are required; the split must contain
+every class in each partition. Both new heads retain `C=0.1` and the existing feature schema: seven
+engineered features, or 512 frozen Chronos features plus those same seven. Scalers and heads fit only
+the stress training partition. Validation is reported separately; no parameter selection or refitting
+uses validation or challenge data. All four classifiers see exactly the same held-out windows.
+
+Outputs in the new evaluation directory:
+
+- `metrics.json`: dataset/model hashes, versions, full group/session split manifests, validation and
+  challenge accuracy, macro-F1, per-class precision/recall/F1, confusion matrices, and scenario diagnostics.
+- `predictions.json`: matching window IDs, true labels, and all four models' predictions and scores.
+- `original-feature-baseline.json` and `stress-feature-baseline.json`: the reconstructed and new baseline heads.
+- `model/`: the stress-trained Chronos head and a local backbone copy, compatible with the existing `predict` command.
+
+Tremor-like false-positive rate is **non-tremor windows predicted tremor-like / all non-tremor windows**;
+the report includes counts and attribution to steady versus intentional signals. A scenario containing
+only tremor-like labels has an undefined rate (`null`). Confusion matrices use true classes as rows and
+predicted classes as columns, in `steady, intentional, tremor_like` order. Macro-F1 always averages all
+three classes, including in single-class scenario diagnostics; overall partition metrics are the main comparison.
+
+Measured synthetic run (generator seed 2026, split seed 42): 240 sessions / 720 windows, split into
+144/48/48 sessions and 432/144/144 windows. The challenge set has 48 windows per class.
+
+| Classifier | Validation accuracy | Challenge accuracy | Challenge macro-F1 | Tremor-like false positives |
+|---|---:|---:|---:|---:|
+| Original Chronos head | 63.19% | 66.67% | 0.6493 | 15/96 (15.63%) |
+| Original feature baseline (reconstructed) | 82.64% | 80.56% | 0.8033 | 15/96 (15.63%) |
+| Stress-trained Chronos head | 95.83% | 95.14% | 0.9514 | 3/96 (3.13%) |
+| Stress-trained feature baseline | 94.44% | 95.14% | 0.9507 | 0/96 (0%) |
+
+The stress-trained Chronos head has higher tremor-like recall (91.67% versus 85.42%) but more false
+positives than the stress-trained baseline. Its remaining false positives are two intentional-with-
+oscillation windows and one stop-start window; three low-amplitude and one amplitude-modulated
+tremor-like windows are missed. No winner is selected or installed into the cursor runtime.
+
+These results describe a single synthetic split. Challenge sessions are independent draws from the
+same scenario families as training, not unseen scenario types or real participants. Windows within a
+session are correlated. Labels follow the simulation: deliberate movement with oscillations remains
+`intentional`, while noisy stationary input is `steady`; low-amplitude signals can be ambiguous. The
+results are not clinical validation or evidence of real-world accessibility benefit. Existing datasets,
+models, commands, seven-feature ordering, and cursor behaviour are preserved.
+
 ## Run it
 
 ```

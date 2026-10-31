@@ -93,6 +93,32 @@ def fit_head(features, labels):
             "intercept": classifier.intercept_.tolist()}
 
 
+def split_challenge(windows, seed=42):
+    """Approximately 60/20/20 train/validation/challenge, keeping groups intact.
+
+    Session integrity is checked even for Windows constructed without the CSV loader.
+    Fold assignment depends only on labels/groups, never features or model scores.
+    """
+    from sklearn.model_selection import StratifiedGroupKFold
+
+    if set(windows.labels) != set(LABELS):
+        raise ValueError(f"Challenge evaluation requires all classes: {LABELS}")
+    owners = {}
+    for session, group in zip(windows.sessions, windows.groups):
+        if owners.setdefault(session, group) != group:
+            raise ValueError("A session cannot belong to multiple groups")
+    for label in LABELS:
+        if len(set(windows.groups[windows.labels == label])) < 5:
+            raise ValueError(f"Need at least five independent groups for class {label}")
+    splitter = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=seed)
+    folds = [test for _, test in splitter.split(windows.velocity, windows.labels, windows.groups)]
+    parts = {"train": np.sort(np.concatenate(folds[2:])), "validation": folds[1], "challenge_test": folds[0]}
+    for name, indices in parts.items():
+        if set(windows.labels[indices]) != set(LABELS):
+            raise ValueError(f"{name} lacks a class; supply more independent groups")
+    return parts
+
+
 def probabilities(features, head):
     x = np.asarray(features, dtype=np.float64)
     mean, scale = np.asarray(head["mean"]), np.asarray(head["scale"])
@@ -113,11 +139,18 @@ def score(features, labels, head):
     from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score
 
     predicted = np.asarray(head["classes"])[probabilities(features, head).argmax(axis=1)]
+    negative = np.asarray(labels) != "tremor_like"
+    false_positive = negative & (predicted == "tremor_like")
     return {"accuracy": float(accuracy_score(labels, predicted)),
-            "macro_f1": float(f1_score(labels, predicted, average="macro")),
+            "macro_f1": float(f1_score(labels, predicted, labels=LABELS, average="macro", zero_division=0)),
             "confusion_matrix_labels": list(LABELS),
             "confusion_matrix": confusion_matrix(labels, predicted, labels=LABELS).tolist(),
-            "per_class": classification_report(labels, predicted, output_dict=True, zero_division=0)}
+            "per_class": classification_report(labels, predicted, labels=LABELS, output_dict=True, zero_division=0),
+            "tremor_like_false_positives": {
+                "count": int(false_positive.sum()), "non_tremor_windows": int(negative.sum()),
+                "rate": float(false_positive.sum() / negative.sum()) if negative.any() else None,
+                "by_true_class": {label: int(np.sum(false_positive & (np.asarray(labels) == label)))
+                                  for label in LABELS if label != "tremor_like"}}}
 
 
 def sha256(path):

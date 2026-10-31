@@ -1,4 +1,4 @@
-"""python -m focusflow.ml {generate-demo,train,predict,record}"""
+"""Offline ML commands, including separate synthetic stress generation/evaluation."""
 import argparse
 import csv
 import json
@@ -40,6 +40,16 @@ def main(argv=None):
     demo.add_argument("--output", default="data/ml/demo.csv")
     demo.add_argument("--groups", type=int, default=90)
     demo.add_argument("--seed", type=int, default=42)
+    stress = sub.add_parser("generate-stress", help="Generate a separate synthetic mixed-signal challenge CSV")
+    stress.add_argument("--output", default="data/ml/stress-v1.csv")
+    stress.add_argument("--groups", type=int, default=240)
+    stress.add_argument("--seed", type=int, default=2026)
+    evaluate = sub.add_parser("evaluate-stress", help="Compare original and stress-trained heads offline")
+    evaluate.add_argument("--data", required=True)
+    evaluate.add_argument("--reference-data", required=True, help="Exact original training CSV for baseline reconstruction")
+    evaluate.add_argument("--model", default="artifacts/motion-demo")
+    evaluate.add_argument("--output", default="artifacts/motion-stress-v1")
+    evaluate.add_argument("--seed", type=int, default=42, help="Group split seed")
     train_parser = sub.add_parser("train", help="Train a head on frozen pretrained Chronos embeddings")
     train_parser.add_argument("--data", required=True)
     train_parser.add_argument("--output", default="artifacts/motion-demo")
@@ -65,10 +75,18 @@ def main(argv=None):
         if args.command == "record":
             record(args)
             return 0
-        from .data import generate_demo, read_windows
+        from .data import generate_demo, generate_stress, read_windows
         if args.command == "generate-demo":
             generate_demo(args.output, args.groups, args.seed)
             print(f"Synthetic data saved to {args.output}")
+        elif args.command == "generate-stress":
+            generate_stress(args.output, args.groups, args.seed)
+            print(f"Synthetic stress data saved to {args.output}")
+        elif args.command == "evaluate-stress":
+            from .stress import evaluate_stress
+            result = evaluate_stress(args.data, args.reference_data, args.model, args.output, args.seed)
+            print(json.dumps({"output": args.output, "synthetic_only": True,
+                              "validation": result["validation"], "challenge_test": result["challenge_test"]}, indent=2))
         elif args.command == "train":
             from .model import train
             result = train(read_windows(args.data), args.data, args.output, args.seed,
