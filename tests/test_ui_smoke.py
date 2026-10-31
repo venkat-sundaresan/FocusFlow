@@ -9,12 +9,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 HOME = tempfile.mkdtemp(prefix="ffui")
 os.environ["FOCUSFLOW_HOME"] = HOME          # before focusflow.config is imported
 
-try:
-    import tkinter
-    tkinter.Tk().destroy()
-    HAVE_DISPLAY = sys.platform == "win32"
-except Exception:
-    HAVE_DISPLAY = False
+HAVE_DISPLAY = False
+if sys.platform == "win32":
+    try:
+        import tkinter
+        tkinter.Tk().destroy()
+        HAVE_DISPLAY = True
+    except Exception:
+        pass
 
 
 @unittest.skipUnless(HAVE_DISPLAY, "needs a Windows desktop session")
@@ -55,6 +57,15 @@ class UiSmokeTests(unittest.TestCase):
         self.ui.main._publish()
         self.assertGreater(len(self.ui.local.all()), 10, "controls must be published as dwell targets")
         self.ui.main.hide()
+
+    def test_system_tray_starts_and_stops(self):
+        try:
+            self.app._start_tray()
+            self.assertTrue(self.app.tray.visible)
+        finally:
+            if self.app.tray is not None:
+                self.app.tray.stop()
+                self.app.tray = None
 
     def test_profile_cards_rebuild_when_a_custom_profile_is_saved(self):
         from focusflow import profiles

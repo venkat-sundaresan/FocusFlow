@@ -1,5 +1,6 @@
 """The FocusFlow window (five sections), plus the Tk thread plumbing every other part of the app talks to."""
 import queue
+import logging
 import tkinter as tk
 
 from . import widgets
@@ -194,6 +195,9 @@ class UI:
     def __init__(self, app):
         self.app = app
         self.root = tk.Tk()
+        self.root.report_callback_exception = self._callback_exception
+        logging.getLogger("focusflow").info("Application Tk root initialized; patchlevel=%s",
+                                           self.root.tk.call("info", "patchlevel"))
         self.root.withdraw()
         self.root.title("FocusFlow")
         widgets.set_scale(self.root.winfo_fpixels("1i") / 96.0)
@@ -204,6 +208,10 @@ class UI:
         self.prompt, self.keyboard, self.task = Prompt(self), KeyboardWindow(self), TaskWindow(self)
         self.overlay = None
         self.root.after(40, self._pump)
+
+    @staticmethod
+    def _callback_exception(exc_type, exc, tb):
+        logging.getLogger("focusflow").error("Tk callback failed", exc_info=(exc_type, exc, tb))
 
     def start(self):
         self.overlay = Overlay(self)

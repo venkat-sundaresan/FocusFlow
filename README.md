@@ -172,6 +172,83 @@ python -m focusflow                  # or double-click focusflow.pyw (no console
 FocusFlow lives in the system tray (green ring = assisting, grey bars = paused) and opens its window on start.
 Closing the window hides it to the tray; **Quit** is in the tray menu.
 
+### Windows startup diagnostics
+
+The module entry point, `focusflow.pyw`, and `run.bat` now initialize persistent diagnostics **before**
+importing the Windows API, application, or Tk UI. Errors remain visible in PowerShell and are appended
+to `%APPDATA%\FocusFlow\focusflow.log` (or `FOCUSFLOW_HOME\focusflow.log` when configured). If that
+directory cannot be written, logging falls back to `%TEMP%\FocusFlow\focusflow.log`; the selected path
+is printed at startup. Clearing a terminal does not erase this file. Python fatal-error handling also
+writes to the log. A GUI-only launch displays a failure dialog when a caught startup exception occurs.
+
+The old application redirected all stderr away from the console after `App` construction began, which
+can make a genuine exception appear to be a silent exit. That behavior was reproduced in a subprocess.
+It does **not** establish which exception caused a particular Windows failure. No Windows failure log
+was available when these changes were made, so neither Python 3.15 nor the mutex is a confirmed root cause.
+
+In PowerShell, from the updated project folder:
+
+```powershell
+Set-Location 'C:\Users\vardh\Downloads\FocusFlow-main\FocusFlow-main'
+python -c "import sys; print(sys.executable); print(sys.version)"
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install --upgrade -r requirements.txt
+.\.venv\Scripts\python.exe -m pip check
+.\.venv\Scripts\python.exe -m focusflow --diagnose
+$LASTEXITCODE
+.\run.bat --show
+$LASTEXITCODE
+Get-Content "$env:APPDATA\FocusFlow\focusflow.log" -Tail 150
+```
+
+`run.bat` prefers `.venv\Scripts\python.exe`, prints the selected interpreter, and otherwise uses
+`python` on PATH. It preserves a failure's exit code and pauses so double-clicked errors can be read.
+Set `$env:FOCUSFLOW_NO_PAUSE='1'` to suppress that pause in automation. `--show` overrides a hidden-window
+startup preference for this launch without changing settings. `--selftest` checks dependencies and
+application imports. `--diagnose` additionally exercises unique/duplicate mutex creation, a hidden Tk
+root, read-only cursor APIs and UI Automation initialization. It does not install input hooks, move the
+pointer, modify settings, or open the activity database; passing it alone does not verify the visible tray
+or working pointer assistance.
+
+The log records interpreter path/version, process ID, architecture, package versions, mutex outcome,
+Tk initialization, server startup, window construction, tray setup, hook registration and mainloop entry.
+A duplicate application mutex now reports an explicit message and exit code 2. Mutex creation failures
+raise the real Windows error instead of being accepted as a first instance. The mutex remains held for
+the application's lifetime and is closed on exit. Pointer assistance starts only after the UI, tray,
+emergency hotkey and mouse hook initialize; startup failure cleans up partially started services.
+
+For Python 3.15, requirements select **Pillow >=13**, the first version listed with 3.15 support in
+[Pillow's support table](https://pillow.readthedocs.io/en/stable/installation/python-support.html).
+This does not certify the full desktop stack on Python 3.15. Actual comtypes/pystray/native API checks
+run against the installed interpreter. To compare with Python 3.11 without replacing the 3.15 environment,
+install Python 3.11 with Tcl/Tk support, then use a separate environment explicitly:
+
+```powershell
+py -3.11 -m venv .venv311
+.\.venv311\Scripts\python.exe -m pip install --upgrade pip
+.\.venv311\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv311\Scripts\python.exe -m focusflow --diagnose
+.\.venv311\Scripts\python.exe -m focusflow --show
+```
+
+Windows verification commands (close the running application before the desktop tests):
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_startup.py -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_ui_smoke.py -v
+# The following opt-in tests move the real pointer; keep your hand off the mouse.
+$env:FOCUSFLOW_LIVE_TESTS='1'
+.\.venv\Scripts\python.exe -m unittest discover -s tests -p test_hook.py -v
+Remove-Item Env:FOCUSFLOW_LIVE_TESTS
+```
+
+The UI smoke test builds every page and exercises the native tray. The live tests check pointer
+stabilization and caption actions. Also visually check the main window/tray, Pause/Resume, and
+Ctrl+Alt+Shift+F emergency stop with your hardware. **The current startup changes have been tested with
+portable failure-injection tests on macOS, not a real Windows session or Python 3.15.** Windows-only
+tests are explicitly skipped elsewhere; their presence is not evidence that they passed on Windows.
+
 | Shortcut | Action |
 |---|---|
 | Ctrl+Alt+F | pause / resume assistance |

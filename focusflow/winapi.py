@@ -1,6 +1,7 @@
 """Thin ctypes layer over the Win32 calls FocusFlow needs. Mouse and registered hotkeys only:
 there is no keyboard hook, no screen capture."""
 import ctypes
+import logging
 import os
 import sys
 import threading
@@ -42,10 +43,12 @@ user32.PostThreadMessageW.argtypes = [w.DWORD, w.UINT, w.WPARAM, w.LPARAM]
 kernel32.OpenProcess.restype = w.HANDLE
 kernel32.OpenProcess.argtypes = [w.DWORD, w.BOOL, w.DWORD]
 kernel32.CloseHandle.argtypes = [w.HANDLE]
+kernel32.CloseHandle.restype = w.BOOL
 kernel32.QueryFullProcessImageNameW.argtypes = [w.HANDLE, w.DWORD, w.LPWSTR, ctypes.POINTER(w.DWORD)]
 kernel32.GetExitCodeProcess.argtypes = [w.HANDLE, ctypes.POINTER(w.DWORD)]
 kernel32.GetModuleHandleW.restype = ctypes.c_void_p
 kernel32.CreateMutexW.restype = w.HANDLE
+kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, w.BOOL, w.LPCWSTR]
 
 
 def set_dpi_aware():
@@ -75,9 +78,12 @@ def time_end_period(ms):
 
 
 def single_instance(name="Local\\FocusFlowAgent"):
+    ctypes.set_last_error(0)
     handle = kernel32.CreateMutexW(None, False, name)
-    already = ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
-    return handle, not already
+    error = ctypes.get_last_error()
+    if not handle:
+        raise ctypes.WinError(error)
+    return handle, error != 183  # ERROR_ALREADY_EXISTS; caller owns and must close the handle
 
 
 # -- pointer ---------------------------------------------------------------
@@ -342,29 +348,50 @@ class HotkeyThread(threading.Thread):
         self.bindings = bindings
         self.tid = None
         self.failed = []
+        self._ready = threading.Event()
+        self.error = None
 
     def run(self):
-        self.tid = kernel32.GetCurrentThreadId()
         callbacks = {}
-        for i, (spec, cb) in enumerate(self.bindings, start=1):
-            try:
-                mods, vk = parse_hotkey(spec)
-            except ValueError:
-                self.failed.append(spec)
-                continue
-            if user32.RegisterHotKey(None, i, mods | 0x4000, vk):  # MOD_NOREPEAT
-                callbacks[i] = cb
-            else:
-                self.failed.append(spec)  # already taken by another app
-        msg = w.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            if msg.message == WM_HOTKEY and msg.wParam in callbacks:
+        try:
+            self.tid = kernel32.GetCurrentThreadId()
+            msg = w.MSG()
+            user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+            for i, (spec, cb) in enumerate(self.bindings, start=1):
                 try:
-                    callbacks[msg.wParam]()
-                except Exception:
-                    pass
-        for i in callbacks:
-            user32.UnregisterHotKey(None, i)
+                    mods, vk = parse_hotkey(spec)
+                except ValueError:
+                    self.failed.append(spec)
+                    continue
+                if user32.RegisterHotKey(None, i, mods | 0x4000, vk):  # MOD_NOREPEAT
+                    callbacks[i] = cb
+                else:
+                    self.failed.append(spec)
+            self._ready.set()
+            while True:
+                result = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if result == -1:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if result == 0:
+                    break
+                if msg.message == WM_HOTKEY and msg.wParam in callbacks:
+                    try:
+                        callbacks[msg.wParam]()
+                    except Exception:
+                        logging.getLogger("focusflow").exception("Hotkey callback failed")
+        except Exception as exc:
+            self.error = exc
+            logging.getLogger("focusflow").exception("Hotkey worker failed")
+        finally:
+            self._ready.set()
+            for i in callbacks:
+                user32.UnregisterHotKey(None, i)
+
+    def wait_ready(self, timeout=5):
+        if not self._ready.wait(timeout):
+            raise RuntimeError("Hotkey initialization timed out")
+        if self.error is not None:
+            raise RuntimeError("Hotkey initialization failed") from self.error
 
     def stop(self):
         if self.tid:
@@ -390,6 +417,8 @@ class MouseHook(threading.Thread):
         self.tid = None
         self._hook = None
         self._proc = _HOOKPROC(self._callback)  # keep a reference alive
+        self._ready = threading.Event()
+        self.error = None
 
     def _callback(self, code, wparam, lparam):
         try:
@@ -405,15 +434,36 @@ class MouseHook(threading.Thread):
         return user32.CallNextHookEx(self._hook, code, wparam, lparam)
 
     def run(self):
-        self.tid = kernel32.GetCurrentThreadId()
-        self._hook = user32.SetWindowsHookExW(WH_MOUSE_LL, ctypes.cast(self._proc, ctypes.c_void_p),
-                                              kernel32.GetModuleHandleW(None), 0)
-        if not self._hook:
-            return
-        msg = w.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-            pass
-        user32.UnhookWindowsHookEx(self._hook)
+        try:
+            self.tid = kernel32.GetCurrentThreadId()
+            msg = w.MSG()
+            # stop() needs a queue even before the first GetMessage call.
+            user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)
+            self._hook = user32.SetWindowsHookExW(WH_MOUSE_LL, ctypes.cast(self._proc, ctypes.c_void_p),
+                                                  kernel32.GetModuleHandleW(None), 0)
+            if not self._hook:
+                raise ctypes.WinError(ctypes.get_last_error())
+            self._ready.set()
+            while True:
+                result = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+                if result == -1:
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if result == 0:
+                    break
+        except Exception as exc:
+            self.error = exc
+            logging.getLogger("focusflow").exception("Mouse hook failed; input remains under Windows control")
+        finally:
+            if self._hook:
+                user32.UnhookWindowsHookEx(self._hook)
+                self._hook = None
+            self._ready.set()
+
+    def wait_ready(self, timeout=5):
+        if not self._ready.wait(timeout):
+            raise RuntimeError("Mouse hook installation timed out")
+        if self.error is not None:
+            raise RuntimeError("Mouse hook installation failed") from self.error
 
     def stop(self):
         if self.tid:

@@ -6,6 +6,7 @@ UIA bounding rectangles are *hints*. We never trust them blindly:
   * a snap point (e.g. the centre) is hit-tested again before FocusFlow clicks there.
 """
 import queue
+import logging
 import threading
 import time
 from concurrent.futures import Future
@@ -53,6 +54,7 @@ class UiaWorker(threading.Thread):
             self.ok = True
         except Exception:
             self.ok = False
+            logging.getLogger("focusflow").exception("UI Automation initialization failed")
         finally:
             self._ready.set()
         if not self.ok:

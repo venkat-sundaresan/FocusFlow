@@ -1,5 +1,5 @@
 """Wires everything together and owns the system-tray icon."""
-import os
+import logging
 import sys
 import threading
 import time
@@ -18,15 +18,20 @@ from .undo import Undo
 
 SETTING_COALESCE_S = 8.0
 EXPORT_DIR = Path.home() / "Documents" / "FocusFlow" / "exports"
+LOG = logging.getLogger("focusflow")
 
 
 class App:
     def __init__(self):
         APP_DIR.mkdir(parents=True, exist_ok=True)
-        self._redirect_output()
+        self._shutting_down = False
+        LOG.info("Loading settings from %s", APP_DIR)
         self.cfg = Settings()
+        LOG.info("Opening activity database")
         self.store = Store(APP_DIR / "activity.db")
+        LOG.info("Creating application Tk UI")
         self.ui = UI(self)
+        LOG.info("Creating pointer engine and services")
         self.engine = Engine(self.cfg, self.store, self.ui.local)
         self.switch = SwitchNav(self.cfg, self.engine, self.ui.local, on_change=lambda t: None)
         self.undoer = Undo(self.cfg, self.store, self)
@@ -42,17 +47,6 @@ class App:
         self.engine.on_adapted = lambda label: self.ui.toast(f"“{label}” now has a larger hit area", 2600)
         self.cfg.on_change(self._on_setting)
 
-    @staticmethod
-    def _redirect_output():
-        # pythonw has no console; keep tracebacks in a log file instead of losing them
-        try:
-            log = open(APP_DIR / "focusflow.log", "a", buffering=1, encoding="utf-8")
-            sys.stderr = log
-            if sys.stdout is None:
-                sys.stdout = log
-        except OSError:
-            pass
-
     # -- status ------------------------------------------------------------------------------------------------
     def status(self):
         e = self.engine
@@ -66,6 +60,7 @@ class App:
         if not self.hook.is_alive():
             self.hook = winapi.MouseHook(self.engine.on_mouse)
             self.hook.start()
+            self.hook.wait_ready(5)
 
     def set_enabled(self, value, log=False):
         prev = self.cfg["enabled"]
@@ -300,7 +295,24 @@ class App:
             item("Quit FocusFlow", lambda i, it: self.quit()),
         )
         self.tray = pystray.Icon("FocusFlow", self._tray_icon(), "FocusFlow", menu)
-        self.tray.run_detached()
+        ready = threading.Event()
+        errors = []
+
+        def setup(icon):
+            try:
+                icon.visible = True
+                LOG.info("System tray backend reports icon visible")
+            except Exception as exc:
+                errors.append(exc)
+                LOG.exception("Tray setup failed")
+            finally:
+                ready.set()
+
+        self.tray.run_detached(setup=setup)
+        if not ready.wait(10):
+            raise RuntimeError("System tray initialization timed out; see worker errors in focusflow.log")
+        if errors:
+            raise RuntimeError("System tray initialization failed") from errors[0]
 
     # -- lifecycle -----------------------------------------------------------------------------------------------
     def _bind_hotkeys(self):
@@ -313,6 +325,11 @@ class App:
                  (hk["switch_next"], self.switch.next), (hk["switch_select"], self.switch.select)]
         self.hotkeys = winapi.HotkeyThread(binds)
         self.hotkeys.start()
+        self.hotkeys.wait_ready(5)
+        if self.hotkeys.failed:
+            LOG.warning("Hotkeys unavailable: %s", self.hotkeys.failed)
+        if hk["emergency"] in self.hotkeys.failed:
+            raise RuntimeError("Emergency-stop hotkey could not be registered; pointer assistance was not started")
 
     def quit(self):
         def done(ok):
@@ -321,51 +338,91 @@ class App:
         self.ui.confirm("Quit FocusFlow?", "Pointer stabilising and dwell clicking will stop.", "Quit", "Keep running", done)
 
     def _shutdown(self):
+        if self._shutting_down:
+            return
+        self._shutting_down = True
+        LOG.info("Stopping services and restoring unassisted pointer input")
+        try:
+            self.engine.set_suspended(True)
+        except Exception:
+            LOG.exception("Could not suspend engine; continuing to remove the input hook")
         try:
             self.engine.flush_stats_now()
             self.store.flush()
         except Exception:
-            pass
+            LOG.exception("Could not flush activity during shutdown")
         for fn in (self.engine.stop, self.hook.stop, lambda: self.hotkeys and self.hotkeys.stop(),
                    self.switch.stop_auto, lambda: self.voice and self.voice.stop(),
                    self.server.stop, lambda: self.tray and self.tray.stop()):
             try:
                 fn()
             except Exception:
-                pass
+                LOG.exception("Service shutdown failed")
         self.ui.quit()
 
-    def run(self):
+    def run(self, show=False):
+        try:
+            self._run(show)
+        finally:
+            self._shutdown()
+            self.ui.root.destroy()
+
+    def _run(self, show):
+        # No pointer changes until the UI, tray and emergency stop are available.
+        self.engine.set_suspended(True)
+        LOG.info("Starting local dashboard server")
         self.server.start()
         (APP_DIR / "port.txt").write_text(str(self.server.port))
+        LOG.info("Dashboard listening on 127.0.0.1:%s; starting overlay", self.server.port)
         self.ui.start()
-        self.engine.start()
-        self.hook.start()
-        self._bind_hotkeys()
+        if show or self.cfg["show_window_on_start"]:
+            LOG.info("Opening main window")
+            self.ui.main.open()
+            self.ui.root.update_idletasks()
+            LOG.info("Main window constructed; mapped=%s", self.ui.main.win.winfo_ismapped())
+        else:
+            LOG.info("Main window hidden by setting; use --show or the tray menu to open it")
+        LOG.info("Starting system tray")
         self._start_tray()
+        LOG.info("Registering hotkeys")
+        self._bind_hotkeys()
+        LOG.info("Installing mouse hook (input still passes through)")
+        self.hook.start()
+        self.hook.wait_ready(5)
+        LOG.info("Starting pointer engine")
+        self.engine.start()
+        self.engine.set_suspended(False)
         if self.cfg["osk_enabled"]:
             self.ui.show_keyboard(True)
         if self.cfg["voice_enabled"]:
             self._sync_voice()
         if self.cfg["switch_enabled"] and self.cfg["switch_auto_scan"]:
             self.switch.start_auto()
-        if self.cfg["show_window_on_start"]:
-            self.ui.show_window()
         if not self.cfg["autostart_asked"]:
             self.cfg.set("autostart_asked", True)
             self.ui.root.after(1500, lambda: self.change_setting("autostart", True))
+        LOG.info("Entering Tk mainloop")
         self.ui.run()
+        LOG.info("Tk mainloop returned")
 
 
-def main():
+def main(show=False):
     winapi.set_dpi_aware()
-    _handle, first = winapi.single_instance()
-    if not first:
-        return
     if "--selftest" in sys.argv:
         return selftest()
-    App().run()
-    os._exit(0)
+    LOG.info("Checking application mutex")
+    handle, first = winapi.single_instance()
+    try:
+        LOG.info("Mutex first_instance=%s", first)
+        if not first:
+            print("FocusFlow's named mutex already exists in this Windows session. "
+                  "Use the existing tray icon or inspect focusflow.log; a second instance was not started.",
+                  file=sys.stderr)
+            return 2
+        App().run(show=show)
+        return 0
+    finally:
+        winapi.kernel32.CloseHandle(handle)
 
 
 def selftest():
