@@ -1,0 +1,199 @@
+# FocusFlow
+
+A Windows accessibility assistant for hand tremor and shaky mouse control. It sits between your mouse and Windows,
+steadies the **real pointer**, helps you land on the control you meant, and clicks for you when you hover — and it
+measures, from real input, whether any of that actually helps.
+
+Everything runs locally. Nothing leaves the PC.
+
+## Run it
+
+```
+pip install -r requirements.txt      # comtypes, pystray, pillow   (Python 3.10+, Windows 10/11)
+python -m focusflow                  # or double-click focusflow.pyw (no console window)
+```
+
+FocusFlow lives in the system tray (green ring = assisting, grey bars = paused) and opens its window on start.
+Closing the window hides it to the tray; **Quit** is in the tray menu.
+
+| Shortcut | Action |
+|---|---|
+| Ctrl+Alt+F | pause / resume assistance |
+| **Ctrl+Alt+Shift+F** | **emergency stop** — all assistance off *and* the mouse hook removed (Ctrl+Alt+F resumes) |
+| Ctrl+Alt+D | show / hide the window |
+| Ctrl+Alt+P | next profile |
+| Ctrl+Alt+L | Live Lab |
+| Ctrl+Alt+K | on-screen keyboard |
+| Ctrl+Alt+O | settings |
+| Ctrl+Alt+Z | undo the last undoable action (asks first) |
+| Ctrl+Alt+N / M | switch navigation: next target / select |
+
+Shortcuts are `RegisterHotKey` registrations (nothing else about the keyboard is observed) and are editable in
+`%APPDATA%\FocusFlow\settings.json`.
+
+## The five sections
+
+1. **Pointer Assist** — jitter reduction and its strength, target attraction, dwell clicking, target adaptation,
+   snap & click protection, tremor sensitivity. Every control is dwell-clickable.
+2. **Adaptive Profiles** — *Precision* (minimal), *Comfort* (balanced; the original PointerLab filter, unchanged),
+   *Maximum Assistance*; save your own; per-application profiles that apply while that program is in front.
+3. **Accessibility Tools** — large high-contrast cursor, pointer trails, target highlighting, dwell on-screen
+   keyboard, voice commands, switch navigation. Each is independent.
+4. **Live Lab** — raw vs stabilised pointer path from real mouse input, the gap between them, speed, direction
+   changes, jitter events, detected target boundaries, dwell progress, active profile and strength. Also launches the
+   measured experiment (below).
+5. **Performance Analytics** — everyday pointer statistics, per-mode experiment comparison, session history,
+   CSV / JSON / PDF export. A browser dashboard with the same data is at `http://127.0.0.1:47321/`.
+
+## How the pointer stabilisation works
+
+PointerLab's `pointer.ts` was ported to `focusflow/pointer.py` (`AdaptivePointer`, `ErraticDetector`,
+`MotionTracker`, `nearbyTarget`, `recordMiss`). The algorithms and **all constants are the originals** (3 Hz base
+cut-off + 0.09 × speed, 2.5 Hz resistance to brief reversals near a button, 0.65 px dead-band, 8 px maximum lag, 150 ms
+gap reset, 12 Hz settling, 3 px segments, 6 short reversals in 1.2 s, 36 px / 8 px ambiguity for nearby targets,
+3 misses to adapt).
+
+A low-level mouse hook receives every move. While jitter reduction is on, the hook **swallows** the move and the
+pipeline places the cursor itself with `SetCursorPos` (verified here: `SetCursorPos` does not re-enter the hook).
+Because a swallowed move does not move the OS cursor, the pipeline integrates the OS-computed deltas into its own raw
+position, filters that, and a 125 Hz thread keeps *settling* the pointer onto the raw position after you stop.
+Clicks land where the filtered pointer is — the same rule as the original lab ("the displayed pointer selects the
+target").
+
+### What differs from the TypeScript original (and why)
+
+| Change | Reason |
+|---|---|
+| Distance constants × display scale | The original is in CSS px; Windows reports physical px. Scale is read per monitor under the pointer (150 % → lag cap 12 px = the same visual 8 px). Scale 1 reproduces the original exactly. |
+| `cutoff_scale` (smoothing strength 0–10) | The original had one fixed curve. Strength 5 = 1.0 = the original; each +3 halves the cut-off. The curve shape and the lag cap are untouched. |
+| Filter fed at ≤ 250 Hz | A browser delivers ~60–120 `pointermove`/s; a gaming mouse reports 1000+. Faster feeding changes the filter's speed estimate. |
+| Raw position integrated from OS deltas | Browser events were absolute and un-swallowed; native moves are not. Resynchronises after any pause > 150 ms or a > 500 px jump (tablets, remote desktop, other apps moving the cursor). |
+| `MotionTracker.corrective` | New counter: reversals ≤ 24 px, for the "corrective movements" metric. Direction-change rule unchanged. |
+| `Attractor` | **New, not in the original.** A bounded pull toward one unambiguous target, applied as an *offset* so the lag bound is untouched; only while slow; never over text; drains the moment you move deliberately. |
+| `nearbyTarget` radius | The original's 36 px / 8 px rule is kept for attribution of misses; the *redirect* radius is a separate, profile-controlled setting. |
+
+The erratic-movement detector only ever **recommends** stronger smoothing, and is described everywhere as a heuristic,
+not a medical assessment.
+
+### Target adaptation (native version of "enlarge after 3 nearby misses")
+
+FocusFlow cannot resize other programs' buttons, so adaptation enlarges the target's *hit area*: after 3 nearby,
+unambiguous misses in a row (a success clears the streak) clicks within 2 × the normal radius are corrected onto that
+target. It never applies to text/document surfaces, is logged, shown with a thicker outline, and is undone from
+Pointer Assist.
+
+## Experiments and analytics
+
+Live Lab → pick a mode → **Start task**: ten activations in a fixed route over five numbered targets, using your real
+mouse and/or dwell. Modes: *Normal mouse operation*, *Jitter reduction only*, *Dwell clicking only*,
+*Target adaptation only*, *Full FocusFlow assistance* (each masks the others; your profile still decides what is
+enabled inside a mode). Recorded per run: raw and stabilised distance, direction changes, corrective movements,
+successful and incorrect clicks, near-misses, accidental activations (wrong control), jitter flags, completion time.
+Only completed runs are saved. Everything is in SQLite (`%APPDATA%\FocusFlow\activity.db`) and exports to CSV, JSON and
+PDF (a dependency-free PDF writer). "Sample data" is flagged and kept separate from real numbers.
+
+## Dwell on minimise / maximise / close
+
+Window caption buttons are dwell targets in every window, including FocusFlow's own and DPI-unaware programs.
+Two facts shaped how:
+
+* **A synthesised mouse click does not press a non-client caption button** (verified here on Character Map and on test
+  windows: client-area clicks arrive, caption-button clicks do nothing). So dwell does not click these buttons; it
+  sends the same system command Windows would (`SC_MINIMIZE`, `SC_MAXIMIZE` / `SC_RESTORE`, `SC_CLOSE`). A program
+  that asks "save changes?" on close still asks.
+* **UI Automation can report the wrong button** for DPI-unaware windows, so Windows' own `WM_NCHITTEST` decides which
+  button the pointer is on, and a short sideways scan finds its exact edges (`focusflow/caption.py`).
+
+Safety: only when the pointer is *inside* the button (never snapped to, attracted to, or used for near-miss redirects)
+and **Close waits 1.5× the dwell time**. Programs that draw their own title bar and answer `HTCAPTION` over their
+buttons are left to UI Automation, and are *not* covered by the system-command route (see limitations).
+`python tests/e2e_caption_dwell.py` runs the whole thing against a real window.
+
+## Accessibility tools
+
+* **Large cursor / trails / highlighting** are drawn on a click-through overlay at the pointer; your system cursor
+  settings are not modified, so turning them off is instant and total.
+* **On-screen keyboard** — dwell keys that *send* characters to the program you were using (`WS_EX_NOACTIVATE`, so it
+  never steals focus). FocusFlow only sends keys; it never reads them.
+* **Voice commands** — Windows' built-in recogniser (SAPI), fixed command grammar, on-device, nothing recorded.
+* **Switch navigation** — Next/Select hotkeys step through the controls of the window in front (found via UI
+  Automation) with an optional auto-scan.
+
+## Safety and reliability
+
+* Emergency stop (above) and tray item; the engine fails *open*: an exception in the hook handler passes the event
+  through untouched, and an exception in the pointer path switches stabilising off and tells you.
+* Multi-monitor virtual desktop bounds and per-monitor DPI are refreshed twice a second.
+* The hook ignores input injected by other programs (accessibility tools, remote desktop) and FocusFlow's own.
+* Settings migrate from the previous version (a one-time `settings.v1.bak` is written); the SQLite database is
+  versioned (`PRAGMA user_version`) and upgraded in place — **no event is ever dropped**. Launcher-era "close this
+  program" undo records are disarmed so they can never act on a recycled PID.
+* The local server binds to 127.0.0.1 exclusively, checks the Host header, needs a per-install token on every API
+  call and sends no CORS headers.
+
+## Privacy
+
+Stored locally in `%APPDATA%\FocusFlow\` (`FOCUSFLOW_HOME` relocates it). No screenshots and no keystroke capture:
+the only hooks are the mouse hook and `RegisterHotKey`. The log stores control labels (e.g. "OK"), never field
+contents (switch it off in Settings). Voice audio is never saved.
+
+## Removed
+
+Study Mode, the notes launcher, the timer / Pomodoro window, the launcher dock and its shortcuts, and the
+experimental v1 "damping" (replaced by the real filter). Old settings are migrated; old history is preserved.
+
+## Tests
+
+```
+python -m unittest discover -s tests            # 150+ tests (live tests skipped unless enabled)
+node --test tests/core.test.js                  # 8 tests: the browser extension's JS logic
+set FOCUSFLOW_LIVE_TESTS=1 && python -m unittest tests.test_hook    # 4 LIVE tests — see below
+```
+
+Covered: filter behaviour on small jitter, rapid movement, intentional reversals, sudden stops, long gaps and
+display scale; detector/tracker/adaptation rules; the attractor; the pipeline; engine click policy and feature masks;
+profiles; settings and database migration; exports (including PDF structure); the experiment recorder; voice grammar;
+switch navigation; the HTTP API; every UI page, the overlay, the keyboard and a full task run.
+
+**The live tests move your real pointer for ~7 seconds** (real hook, real `SetCursorPos`, relative `SendInput`).
+Keep your hand off the mouse while they run — real movement leaks into the measurement and can fail them.
+
+## Measured on this development PC (not a clinical claim)
+
+* Injected 8 Hz tremor of ±3 px at 250 Hz through the live hook: the real cursor travelled **22–26 % less** than the
+  raw input at the default strength and **43–57 % less** at strength 9 (path length, 3 runs each).
+* A 400 px sweep at ~1000 px/s: the real cursor was within 1.5 px of the raw end position ~22 ms after the last input;
+  lag during the sweep stays at or under the 8 px (display-scaled) cap.
+* CPU, one core, measured per thread: ~4–6 % idle with the window hidden; ~3 % with Pointer Assist open; ~25 % while
+  Live Lab is open *and* the pointer moves continuously (it is a diagnostic page). Resident memory ≈ 80 MB. UI
+  Automation probing of other programs adds to this depending on how heavy their accessibility trees are.
+
+## Verified vs. still needs physical testing
+
+**Verified on Windows 11 (150 % scaling), by automated tests and live runs:** the low-level hook delivering absolute
+positions for relative input; swallow + `SetCursorPos` replacement with no echo; tremor reduction and prompt settling
+on the real cursor; assistance off ⇒ 1 : 1 pointer; engine behaviour with mocked Windows calls; settings/database
+migration on a copy of real data; every page, overlay layer, the keyboard window and the task flow rendering and
+working; exports; the API; the voice recogniser attaching to the real microphone and the grammar loading.
+
+**Not verified — needs a person and real hardware:**
+
+* A *physical* mouse, trackpad or high-polling-rate gaming mouse. The tests inject relative input, which is not the
+  same as hardware. Real tremor has irregular timing and amplitude the synthetic signal does not.
+* **Voice recognition of actual speech.** The recogniser starts and reports "listening", but feeding it audio in this
+  session did not produce events, so spoken commands are untested. Needs a microphone and someone speaking.
+* **Multiple monitors at mixed DPI** (per-monitor scale is implemented and read, but only one display was available).
+* The on-screen keyboard typing into other programs and switch scanning against many real applications (the key
+  sending uses `SendInput` Unicode events; compatibility with elevated/administrator windows is not expected).
+* Whether the default strengths *feel* right for a given person. Use the Live Lab and experiments to tune them.
+* Chrome itself with the extension (its stable build blocks `--load-extension`; load it manually).
+
+## Known limitations
+
+* Programs running **as administrator** receive no assistance from a non-elevated FocusFlow (Windows hook rules).
+* Synthetic page clicks cannot open pop-ups (`target=_blank`) because the browser requires a real user gesture.
+* Chromium only exposes its page UI Automation tree if accessibility is on, so page content relies on the extension.
+* Near-miss redirect is deliberately conservative (unambiguous nearest target, never on text) and can be switched off.
+* Dwell on caption buttons of apps with a fully custom title bar (some Electron/Office-style frames) is not
+  guaranteed: it needs the app to answer `WM_NCHITTEST` honestly. Native, UWP/WinUI and standard Chromium frames do.
+* Windows pointer acceleration is applied *before* FocusFlow sees movement; FocusFlow does not change it.

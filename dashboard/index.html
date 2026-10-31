@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FocusFlow Dashboard</title>
+<meta name="ff-token" content="__FF_TOKEN__">
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #ffffff; --ink: #14202e; --muted: #5b6b7d; --line: #d9e0e8;
+    --assist: #007a5a; --manual: #b45309; --warn: #b45309; --bad: #b91c1c; --btn: #14202e; --btnink: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f141b; --card: #1a212b; --ink: #eef2f7; --muted: #9fb0c2; --line: #2e3947;
+            --assist: #2dd4a7; --manual: #fbbf24; --warn: #fbbf24; --bad: #f87171; --btn: #eef2f7; --btnink: #0f141b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  h1 { font-size: 26px; margin: 0; }
+  h2 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 12px; font-size: 14px; }
+  button { font: inherit; font-weight: 600; background: var(--btn); color: var(--btnink); border: 0; border-radius: 10px;
+           padding: 10px 16px; cursor: pointer; min-height: 44px; }
+  button.ghost { background: transparent; color: var(--ink); border: 2px solid var(--line); }
+  button:focus-visible { outline: 3px solid var(--assist); outline-offset: 2px; }
+  .pill { display: inline-flex; gap: 8px; align-items: center; padding: 6px 12px; border-radius: 99px; border: 2px solid var(--line); font-weight: 600; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); }
+  .on .dot { background: var(--assist); } .on { border-color: var(--assist); }
+  .banner { margin: 14px 0; padding: 12px 16px; border-radius: 10px; border: 2px dashed var(--warn); color: var(--warn); font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .tile .n { font-size: 40px; font-weight: 700; line-height: 1.1; }
+  .tile .l { font-weight: 600; } .tile .d { color: var(--muted); font-size: 13px; }
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .tag { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 12px; }
+  .filters button { min-height: 36px; padding: 4px 12px; }
+  .filters button[aria-pressed=true] { background: var(--assist); color: #fff; }
+  .empty { color: var(--muted); padding: 20px 0; }
+  svg text { fill: var(--ink); font-family: inherit; }
+  svg .mut { fill: var(--muted); }
+  #msg { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--btn); color: var(--btnink);
+         padding: 10px 18px; border-radius: 10px; display: none; max-width: 90vw; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>FocusFlow activity</h1>
+      <p class="sub">Everything here is recorded on this PC only. No screenshots, no keystrokes.</p>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+      <span id="state" class="pill"><span class="dot"></span><span id="stateText">…</span></span>
+      <button id="toggle" class="ghost">Pause</button>
+      <button id="viewToggle" class="ghost">Show demo data</button>
+    </div>
+  </header>
+
+  <div id="demoBanner" class="banner" hidden>DEMO DATA — sample numbers for illustration, not recorded from you.
+    <button id="clearDemo" class="ghost" style="margin-left:8px">Remove demo data</button></div>
+
+  <section class="tiles" aria-label="Summary">
+    <div class="card tile"><div class="n" id="tAssisted">–</div><div class="l">Assisted interactions</div><div class="d">Clicks FocusFlow made or fixed</div></div>
+    <div class="card tile"><div class="n" id="tDwell">–</div><div class="l">Successful dwell clicks</div><div class="d" id="tSource"></div></div>
+    <div class="card tile"><div class="n" id="tMiss">–</div><div class="l">Near-miss corrections</div><div class="d" id="tMissD"></div></div>
+    <div class="card tile"><div class="n" id="tPrev">–</div><div class="l">Accidental clicks prevented</div><div class="d">Repeat dwell clicks and bounce re-clicks blocked</div></div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Effort per click: by hand vs with FocusFlow</h2>
+      <p class="sub" id="effNote"></p>
+      <div id="eff"></div>
+    </div>
+    <div class="card">
+      <h2>Where near-misses landed</h2>
+      <p class="sub">Each dot is a pointer position relative to the target. The square is the target; dots outside it would have been missed clicks.</p>
+      <div id="zone"></div>
+    </div>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Pointer stabilisation</h2>
+    <p class="sub" id="ptNote"></p>
+    <div class="tiles" style="margin:8px 0">
+      <div class="card tile"><div class="n" id="pLess">–</div><div class="l">Pointer travel saved</div><div class="d" id="pLessD"></div></div>
+      <div class="card tile"><div class="n" id="pChg">–</div><div class="l">Direction changes cut</div><div class="d" id="pChgD"></div></div>
+      <div class="card tile"><div class="n" id="pFlag">–</div><div class="l">Repeated-reversal flags</div><div class="d">A heuristic, not a diagnosis</div></div>
+    </div>
+    <h2 style="margin-top:14px">Experiment comparison</h2>
+    <p class="sub">Average of completed Live Lab runs per assistance mode.</p>
+    <div id="modes"></div>
+    <p class="sub" style="margin-top:12px">
+      Export: <button class="ghost" data-x="csv">CSV</button> <button class="ghost" data-x="json">JSON</button> <button class="ghost" data-x="pdf">PDF report</button></p>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Activity log</h2>
+    <p class="sub">Undo appears only where FocusFlow can really reverse the action (its own settings and the ON/OFF toggle). Clicks in other programs cannot be undone.</p>
+    <div class="filters" id="filters" role="group" aria-label="Filter events"></div>
+    <div id="log"></div>
+  </section>
+  <p class="sub" style="margin-top:16px"><button id="clearReal" class="ghost">Erase my activity log</button></p>
+</main>
+<div id="msg" role="status"></div>
+<script>
+const TOKEN = document.querySelector('meta[name=ff-token]').content;
+let demo = false, filter = 'all', lastEvents = [];
+const $ = id => document.getElementById(id);
+const api = (path, body) => fetch(path, body === undefined ? { headers: { 'X-FocusFlow-Token': TOKEN } }
+  : { method: 'POST', headers: { 'X-FocusFlow-Token': TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  .then(r => r.json());
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function say(t) { const m = $('msg'); m.textContent = t; m.style.display = 'block'; clearTimeout(say.t); say.t = setTimeout(() => m.style.display = 'none', 4000); }
+
+const LABELS = {
+  interaction_detected: 'Interaction detected', target_identified: 'Target identified', dwell_complete: 'Dwell completed',
+  click_assisted: 'Click assisted', near_miss: 'Near-miss', click_prevented: 'Click prevented', manual_click: 'Manual click',
+  app_launch: 'App launched (older version)', setting_change: 'Setting changed', toggle: 'FocusFlow on/off',
+  target_adapted: 'Hit area enlarged', erratic_movement: 'Repeated short reversals', profile_change: 'Profile changed',
+  emergency_stop: 'Emergency stop'
+};
+function describe(e) {
+  const d = e.detail || {};
+  switch (e.kind) {
+    case 'click_assisted': return ({ dwell: 'by dwelling', snap_dwell: 'snapped to nearest target, then dwelled', near_miss_redirect: 'your click landed just outside; redirected onto the target' }[d.method] || '') +
+      (d.duration_ms ? ` · ${(d.duration_ms / 1000).toFixed(1)} s, ${d.reversals ?? 0} corrections` : '');
+    case 'near_miss': return (d.kind === 'click' ? 'click landed outside the target' : 'pointer hovered just outside the target') + (d.corrected ? ' · corrected' : ' · not altered');
+    case 'click_prevented': return d.reason === 'bounce_click' ? `repeat click ${d.gap_ms ?? ''} ms after the last was ignored` : 'dwell would have clicked the same target again';
+    case 'dwell_complete': return `${d.dwell_ms} ms dwell`;
+    case 'target_identified': return `${d.ctype || ''}${d.size ? ` · ${d.size[0]}×${d.size[1]} px` : ''}`;
+    case 'interaction_detected': return d.tremor >= 0.5 ? 'tremor detected while hovering' : 'pointer settled on a target';
+    case 'manual_click': return `by hand · ${(d.duration_ms / 1000).toFixed(1)} s, ${d.reversals ?? 0} corrections`;
+    case 'target_adapted': return 'three nearby misses in a row; reversible in the app';
+    case 'erratic_movement': return 'heuristic only; not a medical assessment';
+    case 'profile_change': return `profile: ${d.profile}`;
+    case 'setting_change': return `${d.setting} → ${typeof d.value === 'object' ? 'updated' : d.value}`;
+    default: return '';
+  }
+}
+function renderTiles(s) {
+  $('tAssisted').textContent = s.total_assisted; $('tDwell').textContent = s.dwell_clicks;
+  $('tMiss').textContent = s.near_miss_corrected; $('tPrev').textContent = s.prevented;
+  $('tSource').textContent = `${s.by_source.desktop} on desktop · ${s.by_source.browser} in browser`;
+  $('tMissD').textContent = `of ${s.near_miss_detected} near-misses detected`;
+}
+function renderEff(s) {
+  const m = s.efficiency.manual, a = s.efficiency.assisted;
+  const rows = [
+    ['Corrective direction changes per click', m.avg_reversals, a.avg_reversals, v => v.toFixed(1)],
+    ['Pointer path per click (px)', m.avg_path_px, a.avg_path_px, v => Math.round(v)],
+    ['Time to click (s)', m.avg_duration_ms == null ? null : m.avg_duration_ms / 1000, a.avg_duration_ms == null ? null : a.avg_duration_ms / 1000, v => v.toFixed(1)],
+  ];
+  const enough = m.n >= 3 && a.n >= 3;
+  $('effNote').textContent = `Based on ${m.n} clicks by hand and ${a.n} assisted clicks.` + (enough ? '' : ' Not enough of both yet — click a few things by hand, and let dwell click a few, to compare.');
+  if (!enough) { $('eff').innerHTML = '<div class="empty">No comparison yet. Nothing is estimated or made up.</div>'; return; }
+  let h = '<svg viewBox="0 0 460 ' + (rows.length * 84 + 30) + '" width="100%" role="img" aria-label="Average effort per click, by hand versus assisted">';
+  rows.forEach((r, i) => {
+    const y = 24 + i * 84, max = Math.max(r[1], r[2], 1e-9);
+    h += `<text x="0" y="${y - 8}" font-size="13" font-weight="600">${esc(r[0])}</text>`;
+    [['By hand', r[1], 'var(--manual)'], ['With FocusFlow', r[2], 'var(--assist)']].forEach((b, j) => {
+      const by = y + j * 28, w = Math.max(2, 300 * b[1] / max);
+      h += `<rect x="110" y="${by}" width="${w}" height="20" rx="4" fill="${b[2]}"/>` +
+        `<text x="104" y="${by + 15}" font-size="12" text-anchor="end" class="mut">${b[0]}</text>` +
+        `<text x="${116 + w}" y="${by + 15}" font-size="13" font-weight="700">${r[3](b[1])}</text>`;
+    });
+  });
+  $('eff').innerHTML = h + '</svg>';
+}
+function renderZone(pts) {
+  if (!pts.length) { $('zone').innerHTML = '<div class="empty">No near-misses recorded yet.</div>'; return; }
+  const S = 320, c = S / 2, k = c / 2.2;
+  let h = `<svg viewBox="0 0 ${S} ${S}" width="100%" style="max-width:360px" role="img" aria-label="Scatter of near-miss positions around the target">`;
+  h += `<rect x="1" y="1" width="${S - 2}" height="${S - 2}" fill="none" stroke="var(--line)"/>`;
+  h += `<rect x="${c - k}" y="${c - k}" width="${2 * k}" height="${2 * k}" fill="var(--assist)" fill-opacity=".15" stroke="var(--assist)" stroke-width="2"/>`;
+  h += `<text x="${c}" y="${c + 4}" text-anchor="middle" font-size="12" class="mut">target</text>`;
+  pts.forEach(p => {
+    const x = c + Math.max(-2.1, Math.min(2.1, p.nx)) * k, y = c + Math.max(-2.1, Math.min(2.1, p.ny)) * k;
+    h += p.corrected ? `<circle cx="${x}" cy="${y}" r="5" fill="var(--assist)" stroke="var(--card)"/>`
+      : `<rect x="${x - 5}" y="${y - 5}" width="10" height="10" fill="var(--bad)" stroke="var(--card)"/>`;
+  });
+  h += '</svg><p class="sub"><b style="color:var(--assist)">●</b> corrected by FocusFlow &nbsp; <b style="color:var(--bad)">■</b> not altered</p>';
+  $('zone').innerHTML = h;
+}
+function renderFilters() {
+  const kinds = ['all', 'click_assisted', 'near_miss', 'click_prevented', 'manual_click', 'interaction_detected', 'target_identified', 'dwell_complete', 'target_adapted', 'profile_change', 'setting_change'];
+  $('filters').innerHTML = kinds.map(k => `<button class="ghost" data-k="${k}" aria-pressed="${k === filter}">${k === 'all' ? 'All' : LABELS[k]}</button>`).join('');
+  $('filters').querySelectorAll('button').forEach(b => b.onclick = () => { filter = b.dataset.k; renderFilters(); renderLog(); });
+}
+function renderLog() {
+  const rows = lastEvents.filter(e => filter === 'all' || e.kind === filter);
+  if (!rows.length) { $('log').innerHTML = '<div class="empty">Nothing recorded yet. Hover over a button for a moment and FocusFlow will click it.</div>'; return; }
+  $('log').innerHTML = '<table><thead><tr><th>Time</th><th>Event</th><th>Target</th><th>Details</th><th>Where</th><th></th></tr></thead><tbody>' +
+    rows.slice(0, 120).map(e => `<tr><td class="muted" style="white-space:nowrap">${new Date(e.ts * 1000).toLocaleTimeString()}</td>
+      <td><span class="tag">${esc(LABELS[e.kind] || e.kind)}</span></td><td>${esc(e.target || '')}</td><td class="muted">${esc(describe(e))}</td>
+      <td class="muted">${esc(e.source)}</td>
+      <td>${e.demo ? '' : e.undone ? '<span class="muted">Undone</span>' : e.undoable ? `<button data-undo="${e.id}">Undo</button>` : '<span class="muted" title="FocusFlow cannot safely reverse this">No undo</span>'}</td></tr>`).join('') + '</tbody></table>';
+  $('log').querySelectorAll('[data-undo]').forEach(b => b.onclick = async () => {
+    const r = await api('/api/undo', { id: +b.dataset.undo }); say(r.message || (r.ok ? 'Undone' : 'Could not undo')); refresh();
+  });
+}
+function renderPointer(p, modes) {
+  const less = p.raw_distance > 0 ? (1 - p.stabilised_distance / p.raw_distance) * 100 : null;
+  const chg = p.raw_changes > 0 ? (1 - p.stabilised_changes / p.raw_changes) * 100 : null;
+  $('pLess').textContent = less == null ? '–' : Math.round(less) + '%';
+  $('pChg').textContent = chg == null ? '–' : Math.round(chg) + '%';
+  $('pFlag').textContent = p.erratic_flags;
+  $('pLessD').textContent = p.n ? `raw ${Math.round(p.raw_distance)} px → ${Math.round(p.stabilised_distance)} px` : '';
+  $('pChgD').textContent = p.n ? `raw ${p.raw_changes} → ${p.stabilised_changes}` : '';
+  $('ptNote').textContent = p.n ? `Measured over ${(p.seconds / 60).toFixed(0)} minutes of active use.` : 'No pointer statistics recorded yet. Nothing is estimated.';
+  const names = Object.keys(modes);
+  $('modes').innerHTML = !names.length ? '<div class="empty">No completed experiment runs yet. Open Live Lab in the FocusFlow window and press Start task.</div>' :
+    '<table><thead><tr><th>Mode</th><th>Runs</th><th>Time</th><th>Raw px</th><th>Stabilised px</th><th>Dir. changes</th><th>Near-misses</th><th>Wrong clicks</th><th>Accidental</th></tr></thead><tbody>' +
+    names.map(n => { const m = modes[n]; return `<tr><td>${esc(n)}</td><td>${m.n}</td><td>${m.seconds.toFixed(1)} s</td><td>${Math.round(m.raw_distance)}</td><td>${Math.round(m.stabilised_distance)}</td><td>${m.stabilised_changes.toFixed(0)}</td><td>${m.near_misses.toFixed(1)}</td><td>${m.incorrect.toFixed(1)}</td><td>${m.accidental.toFixed(1)}</td></tr>`; }).join('') + '</tbody></table>';
+}
+document.querySelectorAll('[data-x]').forEach(b => b.onclick = async () => {
+  const r = await fetch('/api/export?format=' + b.dataset.x + (demo ? '&demo=1' : ''), { headers: { 'X-FocusFlow-Token': TOKEN } });
+  const blob = await r.blob(), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'focusflow.' + b.dataset.x; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+async function refresh() {
+  try {
+    const q = demo ? '?demo=1' : '';
+    const [s, ev, se] = await Promise.all([api('/api/stats' + q), api('/api/events' + q + (q ? '&' : '?') + 'limit=200'), api('/api/sessions' + q)]);
+    renderTiles(s.stats); renderEff(s.stats); renderZone(s.miss_points); lastEvents = ev.events; renderLog(); renderPointer(se.pointer, se.modes);
+    const on = s.status.enabled;
+    $('state').className = 'pill' + (on ? ' on' : ''); $('stateText').textContent = on ? 'FocusFlow is ON' : 'FocusFlow is paused';
+    $('toggle').textContent = on ? 'Pause' : 'Resume'; $('toggle').dataset.on = on;
+    $('demoBanner').hidden = !demo;
+    $('viewToggle').textContent = demo ? 'Show my real data' : (s.has_demo ? 'Show demo data' : 'Load demo data');
+    $('viewToggle').dataset.has = s.has_demo;
+  } catch (e) { $('stateText').textContent = 'FocusFlow is not running'; }
+}
+$('toggle').onclick = async () => { await api('/api/toggle', { enabled: $('toggle').dataset.on !== 'true' }); refresh(); };
+$('viewToggle').onclick = async () => {
+  if (!demo && $('viewToggle').dataset.has !== 'true') await api('/api/demo', { action: 'load' });
+  demo = !demo; refresh();
+};
+$('clearDemo').onclick = async () => { await api('/api/demo', { action: 'clear' }); demo = false; refresh(); };
+$('clearReal').onclick = async () => { if (confirm('Erase your whole FocusFlow activity log? This cannot be undone.')) { await api('/api/clear', {}); refresh(); } };
+renderFilters(); refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>

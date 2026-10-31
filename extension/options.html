@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FocusFlow Web Assist</title>
+<style>
+  :root { --bg: #fff; --ink: #14202e; --muted: #5b6b7d; --ok: #007a5a; --bad: #b91c1c; --line: #d9e0e8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151b23; --ink: #eef2f7; --muted: #9fb0c2; --ok: #2dd4a7; --bad: #f87171; --line: #2e3947; } }
+  body { margin: 0; padding: 16px; width: 340px; background: var(--bg); color: var(--ink); font: 15px/1.45 "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .row { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); flex: none; }
+  .ok .dot { background: var(--ok); }
+  p { color: var(--muted); margin: 6px 0; font-size: 13px; }
+  input { font: inherit; flex: 1; padding: 8px; border-radius: 8px; border: 2px solid var(--line); background: transparent; color: inherit; min-width: 0; }
+  button { font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 0; background: var(--ink); color: var(--bg); cursor: pointer; min-height: 40px; }
+</style>
+</head>
+<body>
+  <h1>FocusFlow Web Assist</h1>
+  <div id="agent" class="row"><span class="dot"></span><span id="agentText">Looking for the FocusFlow desktop agent…</span></div>
+  <div id="pair" class="row"><span class="dot"></span><span id="pairText">…</span></div>
+  <p>Dwell-click settings, snapping and the on/off switch are controlled from the FocusFlow desktop app, so the browser and desktop always feel the same.</p>
+  <p>If pairing did not happen automatically, paste the pairing code from FocusFlow ▸ Settings:</p>
+  <div class="row"><input id="token" placeholder="pairing code" autocomplete="off" spellcheck="false"><button id="save">Pair</button></div>
+  <script src="options.js"></script>
+</body>
+</html>

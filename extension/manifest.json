@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "FocusFlow Web Assist",
+  "version": "0.1.0",
+  "description": "Tremor-friendly browsing: dwell clicking, near-miss correction and target highlighting, working with the FocusFlow desktop agent.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["core.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true
+    }
+  ],
+  "options_page": "options.html",
+  "action": { "default_title": "FocusFlow Web Assist", "default_popup": "options.html" },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+}
