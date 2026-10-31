@@ -1,0 +1,235 @@
+{
+  "schema": 1,
+  "seed": 42,
+  "data_sha256": "c26abcd23fb0f183864be45c62958e3740cf5a3c142fad04e6b079ac67f9d3cc",
+  "sources": [
+    "synthetic"
+  ],
+  "contains_synthetic_data": true,
+  "base_model": "amazon/chronos-t5-tiny",
+  "base_revision": "29d808298f1a62493e7b9a5e08529d0d930fa189",
+  "method": "frozen Chronos encoder + standardized logistic regression; encoder not fine-tuned",
+  "train_windows": 201,
+  "test_windows": 69,
+  "train_groups": [
+    "demo-42-1",
+    "demo-42-10",
+    "demo-42-11",
+    "demo-42-13",
+    "demo-42-14",
+    "demo-42-15",
+    "demo-42-16",
+    "demo-42-17",
+    "demo-42-19",
+    "demo-42-20",
+    "demo-42-21",
+    "demo-42-22",
+    "demo-42-23",
+    "demo-42-24",
+    "demo-42-26",
+    "demo-42-27",
+    "demo-42-28",
+    "demo-42-3",
+    "demo-42-30",
+    "demo-42-31",
+    "demo-42-33",
+    "demo-42-35",
+    "demo-42-36",
+    "demo-42-37",
+    "demo-42-38",
+    "demo-42-39",
+    "demo-42-4",
+    "demo-42-41",
+    "demo-42-42",
+    "demo-42-43",
+    "demo-42-46",
+    "demo-42-47",
+    "demo-42-48",
+    "demo-42-5",
+    "demo-42-50",
+    "demo-42-51",
+    "demo-42-52",
+    "demo-42-54",
+    "demo-42-55",
+    "demo-42-56",
+    "demo-42-57",
+    "demo-42-58",
+    "demo-42-60",
+    "demo-42-61",
+    "demo-42-62",
+    "demo-42-63",
+    "demo-42-64",
+    "demo-42-66",
+    "demo-42-67",
+    "demo-42-69",
+    "demo-42-7",
+    "demo-42-70",
+    "demo-42-73",
+    "demo-42-74",
+    "demo-42-76",
+    "demo-42-77",
+    "demo-42-79",
+    "demo-42-8",
+    "demo-42-80",
+    "demo-42-81",
+    "demo-42-83",
+    "demo-42-84",
+    "demo-42-85",
+    "demo-42-86",
+    "demo-42-88",
+    "demo-42-89",
+    "demo-42-9"
+  ],
+  "test_groups": [
+    "demo-42-0",
+    "demo-42-12",
+    "demo-42-18",
+    "demo-42-2",
+    "demo-42-25",
+    "demo-42-29",
+    "demo-42-32",
+    "demo-42-34",
+    "demo-42-40",
+    "demo-42-44",
+    "demo-42-45",
+    "demo-42-49",
+    "demo-42-53",
+    "demo-42-59",
+    "demo-42-6",
+    "demo-42-65",
+    "demo-42-68",
+    "demo-42-71",
+    "demo-42-72",
+    "demo-42-75",
+    "demo-42-78",
+    "demo-42-82",
+    "demo-42-87"
+  ],
+  "transfer_model": {
+    "accuracy": 0.9565217391304348,
+    "macro_f1": 0.94541910331384,
+    "confusion_matrix_labels": [
+      "steady",
+      "intentional",
+      "tremor_like"
+    ],
+    "confusion_matrix": [
+      [
+        27,
+        0,
+        0
+      ],
+      [
+        3,
+        12,
+        0
+      ],
+      [
+        0,
+        0,
+        27
+      ]
+    ],
+    "per_class": {
+      "intentional": {
+        "precision": 1.0,
+        "recall": 0.8,
+        "f1-score": 0.8888888888888888,
+        "support": 15.0
+      },
+      "steady": {
+        "precision": 0.9,
+        "recall": 1.0,
+        "f1-score": 0.9473684210526315,
+        "support": 27.0
+      },
+      "tremor_like": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 27.0
+      },
+      "accuracy": 0.9565217391304348,
+      "macro avg": {
+        "precision": 0.9666666666666667,
+        "recall": 0.9333333333333332,
+        "f1-score": 0.94541910331384,
+        "support": 69.0
+      },
+      "weighted avg": {
+        "precision": 0.9608695652173913,
+        "recall": 0.9565217391304348,
+        "f1-score": 0.9552504449529621,
+        "support": 69.0
+      }
+    }
+  },
+  "motion_features_baseline": {
+    "accuracy": 1.0,
+    "macro_f1": 1.0,
+    "confusion_matrix_labels": [
+      "steady",
+      "intentional",
+      "tremor_like"
+    ],
+    "confusion_matrix": [
+      [
+        27,
+        0,
+        0
+      ],
+      [
+        0,
+        15,
+        0
+      ],
+      [
+        0,
+        0,
+        27
+      ]
+    ],
+    "per_class": {
+      "intentional": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 15.0
+      },
+      "steady": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 27.0
+      },
+      "tremor_like": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 27.0
+      },
+      "accuracy": 1.0,
+      "macro avg": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 69.0
+      },
+      "weighted avg": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1-score": 1.0,
+        "support": 69.0
+      }
+    }
+  },
+  "majority_baseline_accuracy": 0.21739130434782608,
+  "limitations": "Offline motion classification only. Synthetic performance does not establish benefit for people, clinical validity, or safe automatic cursor control. Softmax scores are not calibrated confidence or out-of-distribution detection.",
+  "versions": {
+    "numpy": "2.4.6",
+    "scikit-learn": "1.9.1",
+    "torch": "2.15.0",
+    "transformers": "4.57.6",
+    "chronos-forecasting": "2.3.2"
+  }
+}

@@ -1,0 +1,7 @@
+# Optional; the Windows desktop application does not need these packages.
+# Python 3.11 recommended. See requirements-ml-lock.txt for the verified environment.
+numpy>=1.26,<3
+scikit-learn>=1.5,<2
+torch>=2.2,<3
+transformers>=4.41,<5
+chronos-forecasting>=2,<3

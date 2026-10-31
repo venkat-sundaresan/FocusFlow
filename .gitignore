@@ -12,6 +12,21 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.venv-ml/
+.cache/
+artifacts/*
+!artifacts/motion-demo/
+artifacts/motion-demo/*
+!artifacts/motion-demo/classifier.json
+!artifacts/motion-demo/metrics.json
+!artifacts/motion-demo/backbone/
+artifacts/motion-demo/backbone/*
+!artifacts/motion-demo/backbone/config.json
+!artifacts/motion-demo/backbone/generation_config.json
+!artifacts/motion-demo/backbone/model.safetensors
+!artifacts/motion-demo/backbone/LICENSE
+!artifacts/motion-demo/backbone/NOTICE
+data/ml/
 venv/
 env/
 

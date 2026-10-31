@@ -6,6 +6,94 @@ measures, from real input, whether any of that actually helps.
 
 Everything runs locally. Nothing leaves the PC.
 
+## Optional ML motion classifier
+
+FocusFlow now includes an **offline transfer-learning pipeline** for classifying pointer recordings as
+`steady`, `intentional`, or `tremor_like`. It uses the frozen encoder from Amazon's pretrained
+[Chronos-T5-Tiny](https://huggingface.co/amazon/chronos-t5-tiny) time-series model, pools embeddings from
+the horizontal and vertical velocity signals, and trains a standardized logistic-regression head.
+Seven motion features preserve amplitude and direction information. This is a trained classification
+head on pretrained features, **not full encoder fine-tuning**. Chronos is a general time-series model,
+not a model pretrained to diagnose tremor; its [embedding API](https://github.com/amazon-science/chronos-forecasting)
+supports this downstream use.
+
+The ML commands run on Windows, macOS, and Linux independently of the Windows desktop application.
+Use Python 3.11 in a separate environment (PowerShell: replace `.venv-ml/bin/python` with
+`.venv-ml\Scripts\python.exe`):
+
+```sh
+python3.11 -m venv .venv-ml
+.venv-ml/bin/python -m pip install -r requirements-ml.txt
+.venv-ml/bin/python -m focusflow.ml generate-demo --output data/ml/demo.csv
+.venv-ml/bin/python -m focusflow.ml predict --data data/ml/demo.csv --model artifacts/motion-demo --output artifacts/demo-predictions.json
+# Optional: train a fresh head using the bundled pretrained weights, without downloads.
+.venv-ml/bin/python -m focusflow.ml train --data data/ml/demo.csv --output artifacts/motion-retrained --base-model artifacts/motion-demo/backbone --offline
+.venv-ml/bin/python -m unittest discover -s tests -p test_ml.py
+```
+
+Training with the default remote base model downloads pretrained weights from Hugging Face;
+recordings are never uploaded. The commands above reuse the bundled weights offline.
+Prediction uses only the saved local weights and needs no network. The generated bundle contains
+`backbone/model.safetensors`, `classifier.json` (scaling and learned weights), and `metrics.json`.
+Copy the **whole model directory** to another machine for inference. `requirements-ml-lock.txt`
+records the exact verified package versions. The trained synthetic demo bundle is included in Git,
+with the backbone's Apache-2.0 license and attribution. Other generated artifacts, cached downloads,
+environments, and recordings are gitignored. Generation and training refuse to overwrite existing outputs.
+Training can reuse a downloaded bundle with `--base-model artifacts/motion-demo/backbone --offline`;
+`--revision COMMIT_SHA` pins a remote backbone version. The report records the resolved model commit,
+dataset SHA-256, dependency versions, and group membership of each split.
+
+No labeled recordings were supplied with this repository, so the generated model is a **synthetic
+demonstration**. It is not validated for people with tremor and does not change cursor movement,
+dwell timing, or click decisions. Class scores are uncalibrated, and real signals outside the training
+distribution can receive incorrect high scores. The existing filters remain the desktop runtime.
+
+### Train on real pointer recordings
+
+Provide a CSV with this header (timestamps in seconds, coordinates in physical screen pixels):
+
+```csv
+session_id,group_id,timestamp_s,x,y,dpi_scale,label,source
+session-001,participant-001,0.000000,500,400,1.5,steady,recorded
+session-001,participant-001,0.016667,501,400,1.5,steady,recorded
+```
+
+The two rows illustrate the format; each session needs at least two seconds of samples at 60 Hz or
+higher. `dpi_scale` is physical pixels per logical pixel (150% scaling = 1.5). Keep one label, scale,
+and participant per session; start a new session after a label or monitor-scale change. Use the same
+anonymous `group_id` for **all recordings from the same participant**. Each class needs at least two
+independent groups, with substantially more participants needed for meaningful evaluation.
+
+On Windows, explicitly capture sessions with the included recorder. Pause FocusFlow assistance first
+to capture unassisted movement, stay on one monitor, and choose the label for the requested task:
+
+```sh
+python -m focusflow.ml record --output data/ml/session-001.csv --session session-001 --group participant-001 --label steady --seconds 20
+python -m focusflow.ml train --data data/ml/labeled-recordings.csv --output artifacts/motion-real
+```
+
+Combine your recordings into `labeled-recordings.csv` with one header, preserving session and participant
+IDs. Labels should describe observed movement; `tremor_like` is a signal category, not a diagnosis.
+Existing SQLite statistics and CSV analytics exports lack timestamped paths and cannot train this model.
+
+Preprocessing divides paths by DPI scale, resamples contiguous segments to 60 Hz, and creates
+non-overlapping two-second velocity windows. It rejects invalid timestamps/coordinates, splits at
+gaps over 100 ms, and discards incomplete trailing windows. A seeded 75/25 **group** split keeps
+participants out of both sets; scalers and heads fit only training windows. Reports include accuracy,
+macro-F1, per-class results, confusion matrices, a majority baseline, and a motion-features-only
+logistic-regression baseline. Synthetic scores do not measure real accessibility benefit or establish
+that the pretrained model outperforms the simpler baseline.
+
+The generated seed-42 demo bundle in `artifacts/motion-demo` uses 201 training windows and 69 held-out
+windows from 90 independent simulated sessions. Its held-out accuracy is **95.65%**, macro-F1 **0.9454**;
+the motion-features-only baseline reaches **100%** on this simple synthetic task. These results support
+testing the pipeline, not preferring Chronos over the simpler baseline. The self-contained bundle is
+approximately 32 MB; the prediction command generates `artifacts/demo-predictions.json` locally.
+
+The reusable Python API is `focusflow.ml.model.MotionClassifier(model_dir).predict(velocity)` where
+`velocity` has shape `(N, 2, 120)` in logical pixels per second sampled at 60 Hz; `read_windows` in
+`focusflow.ml.data` performs the CSV preprocessing. Load once and run outside the mouse-hook thread.
+
 ## Run it
 
 ```
