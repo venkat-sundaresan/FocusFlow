@@ -222,7 +222,7 @@ Reproduce the tests and worker benchmark:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-node --test tests/core.test.js
+node --test tests/*.test.js
 .\.venv\Scripts\python.exe -m focusflow.ml.benchmark_live --output artifacts/live-benchmark-new.json
 ```
 
@@ -346,7 +346,7 @@ Shortcuts are `RegisterHotKey` registrations (nothing else about the keyboard is
 
 1. **Pointer Assist** — jitter reduction and its strength, target attraction, dwell clicking, target adaptation,
    snap & click protection, tremor sensitivity. Every control is dwell-clickable.
-2. **Adaptive Profiles** — *Precision* (minimal), *Comfort* (balanced; the original PointerLab filter, unchanged),
+2. **Adaptive Profiles** — *Precision* (minimal), *Comfort* (balanced speed-adaptive smoothing),
    *Maximum Assistance*; save your own; per-application profiles that apply while that program is in front.
 3. **Accessibility Tools** — large high-contrast cursor, pointer trails, target highlighting, dwell on-screen
    keyboard, voice commands, switch navigation. Each is independent.
@@ -356,10 +356,40 @@ Shortcuts are `RegisterHotKey` registrations (nothing else about the keyboard is
 5. **Performance Analytics** — everyday pointer statistics, per-mode experiment comparison, session history,
    CSV / JSON / PDF export. A browser dashboard with the same data is at `http://127.0.0.1:47321/`.
 
+## Target adaptation and smoother jitter reduction
+
+In **Pointer Assist**, enable **Learn from nearby misses** and **Visibly enlarge repeatedly missed targets**.
+The configured threshold defaults to **three nearby misses on the same target**, not one. A successful
+manual hit resets that target's streak. Snap and dwell do not need to be enabled. **Undo adaptation** restores
+normal targets and clears the streaks. In a browser, reload the FocusFlow extension and refresh the page
+after updating these files; web buttons are enlarged using their actual DOM elements.
+
+Native desktop controls use a larger, labelled, click-through **proxy over the original button** and the
+existing expanded click area; FocusFlow does not rewrite other applications' layouts. Only a clearly
+nearest, fresh target is eligible. Ambiguous targets, text-selection surfaces and stale geometry remain
+unassisted. A UI Automation provider that does not expose a control cannot be adapted reliably.
+
+The fix separates physical-click attribution from dwell hysteresis, refreshes stationary UI Automation
+probes before the 400 ms click-cache expiry, and shows adapted controls while the cursor is still beside
+them. Browser enlargement now retains its original transform, restores styles on disable/undo, and
+honours the expanded hit area independently of the visual toggle.
+
+Jitter smoothing estimates speed from **filtered signed velocity**, so repeated back-and-forth movement
+no longer raises the cutoff as if it were deliberate travel. Strength settings, the 8 reference-pixel lag
+cap, settling, emergency stop and optional ML modes remain available. In a deterministic 250 Hz synthetic
+±3 px horizontal oscillation, default-strength peak-to-peak output/raw ratios changed from 0.802 to 0.653
+at 8 Hz and from 0.791 to 0.513 at 12 Hz. These are synthetic filter measurements, not clinical results or
+verification of Windows mouse responsiveness.
+
+Regression checks: `python -m unittest discover -s tests -v` and `node --test tests/*.test.js`.
+On Windows, also check three nearby misses with snap/dwell off, a subsequent click in the enlarged area,
+Undo, and the emergency-stop hotkey. Native window rendering and physical pointer behaviour require a
+Windows desktop; mocked engine and DOM tests do not establish that verification.
+
 ## How the pointer stabilisation works
 
 PointerLab's `pointer.ts` was ported to `focusflow/pointer.py` (`AdaptivePointer`, `ErraticDetector`,
-`MotionTracker`, `nearbyTarget`, `recordMiss`). The algorithms and **all constants are the originals** (3 Hz base
+`MotionTracker`, `nearbyTarget`, `recordMiss`). The timing and distance constants are retained (3 Hz base
 cut-off + 0.09 × speed, 2.5 Hz resistance to brief reversals near a button, 0.65 px dead-band, 8 px maximum lag, 150 ms
 gap reset, 12 Hz settling, 3 px segments, 6 short reversals in 1.2 s, 36 px / 8 px ambiguity for nearby targets,
 3 misses to adapt).
@@ -375,8 +405,9 @@ target").
 
 | Change | Reason |
 |---|---|
-| Distance constants × display scale | The original is in CSS px; Windows reports physical px. Scale is read per monitor under the pointer (150 % → lag cap 12 px = the same visual 8 px). Scale 1 reproduces the original exactly. |
-| `cutoff_scale` (smoothing strength 0–10) | The original had one fixed curve. Strength 5 = 1.0 = the original; each +3 halves the cut-off. The curve shape and the lag cap are untouched. |
+| Distance constants × display scale | The original is in CSS px; Windows reports physical px. Scale is read per monitor under the pointer (150 % → lag cap 12 px = the same visual 8 px). Scale 1 uses reference-pixel distances. |
+| `cutoff_scale` (smoothing strength 0–10) | The original had one fixed curve. Strength 5 = baseline scale 1.0; each +3 halves the cut-off. The curve shape and the lag cap are untouched. |
+| Signed velocity speed estimate | Low-pass each velocity component before taking magnitude, so alternating tremor does not weaken its own filtering. |
 | Filter fed at ≤ 250 Hz | A browser delivers ~60–120 `pointermove`/s; a gaming mouse reports 1000+. Faster feeding changes the filter's speed estimate. |
 | Raw position integrated from OS deltas | Browser events were absolute and un-swallowed; native moves are not. Resynchronises after any pause > 150 ms or a > 500 px jump (tablets, remote desktop, other apps moving the cursor). |
 | `MotionTracker.corrective` | New counter: reversals ≤ 24 px, for the "corrective movements" metric. Direction-change rule unchanged. |
@@ -457,7 +488,7 @@ experimental v1 "damping" (replaced by the real filter). Old settings are migrat
 
 ```
 python -m unittest discover -s tests            # 150+ tests (live tests skipped unless enabled)
-node --test tests/core.test.js                  # 8 tests: the browser extension's JS logic
+node --test tests/*.test.js                  # 8 tests: the browser extension's JS logic
 set FOCUSFLOW_LIVE_TESTS=1 && python -m unittest tests.test_hook    # 4 LIVE tests — see below
 ```
 

@@ -2,6 +2,7 @@
 
 AdaptivePointer, ErraticDetector, MotionTracker, nearby_target and the miss-streak rule are the original
 algorithms with the original constants (times in milliseconds, distances in "reference" pixels).
+AdaptivePointer now estimates speed from filtered signed velocity so oscillation does not defeat smoothing.
 
 Differences from the TypeScript original, all forced by moving from browser events to a native hook:
   * `scale`        - the original constants are CSS pixels; Windows reports physical pixels, so every distance
@@ -112,6 +113,7 @@ class AdaptivePointer:
     def reset(self):
         self.raw = self.output = self.vector = None
         self.speed = 0.0                      # reference px / s
+        self.velocity = (0.0, 0.0)
         self.last_time = self.last_input_time = 0.0
 
     def sample(self, point, time, near_button=False):
@@ -121,19 +123,24 @@ class AdaptivePointer:
             self.raw = self.output = point
             self.last_time = self.last_input_time = time
             self.speed, self.vector = 0.0, None
+            self.velocity = (0.0, 0.0)
             return self.output
         dt = max(MIN_DT_MS, min(MAX_DT_MS, time - self.last_input_time)) / 1000.0
         vx, vy = point[0] - self.raw[0], point[1] - self.raw[1]
         step = math.hypot(vx, vy) / s
         reversal = self.vector is not None and vx * self.vector[0] + vy * self.vector[1] < 0
-        inst = step / dt
-        self.speed += (1 - math.exp(-dt * SPEED_TAU)) * (inst - self.speed)
+        # Filter signed velocity before taking its magnitude. Rectifying each tiny
+        # reversal first made tremor look like fast travel and opened the filter.
+        a = 1 - math.exp(-dt * SPEED_TAU)
+        ux, uy = self.velocity
+        self.velocity = (ux + a * (vx / s / dt - ux), uy + a * (vy / s / dt - uy))
+        self.speed = math.hypot(*self.velocity)
         gap = distance(point, self.output) / s
         # tiny motion stays stable; sustained motion breaks out of the sub-pixel deadband
         if near_button and reversal and step < NEAR_REVERSAL_STEP_PX and gap < NEAR_REVERSAL_GAP_PX:
             cutoff = NEAR_BUTTON_CUTOFF_HZ
         else:
-            cutoff = BASE_CUTOFF_HZ + max(self.speed, inst * 0.65) * CUTOFF_PER_SPEED
+            cutoff = BASE_CUTOFF_HZ + self.speed * CUTOFF_PER_SPEED
         cutoff *= self.cutoff_scale
         if gap > DEADBAND_PX:
             alpha = 1 - math.exp(-2 * math.pi * cutoff * dt)

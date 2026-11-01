@@ -44,6 +44,8 @@ class Overlay:
         self.raw_tag = c.create_text(0, 0, text="your hand", fill=RAW_COLOR, font=("Segoe UI", 9, "bold"), anchor="nw",
                                      state="hidden")
         self.zoom_tag = c.create_text(0, 0, text="", fill="#FFFFFF", font=("Segoe UI", 9, "bold"), anchor="s", state="hidden")
+        self.zoom_label = c.create_text(0, 0, text="", fill=FG, font=font(13, bold=True),
+                                        anchor="center", state="hidden")
         self.raw_trail, self.steady_trail = deque(), deque()
         self.scan = c.create_rectangle(0, 0, 0, 0, width=px(4), outline=AMBER)
         # dwell gauge: a thin coloured arc over a slim dark underlay (contrast on light and dark pages), nothing else
@@ -97,18 +99,25 @@ class Overlay:
         if state is not None:
             color = RING_ASSIST if state.assisted else RING
             l, t, r, b = state.rect
-            if cfg["visual_enlarge"] and state.grown:       # only a target missed twice is visibly enlarged
+            if cfg["visual_enlarge"] and state.grown:
                 k = ZOOM_GROWN
                 w, h = (r - l) * (k - 1) / 2, (b - t) * (k - 1) / 2
-                w, h = max(w, px(6)), max(h, px(6))
+                # A labelled proxy of the native control, not just an outline. Keep
+                # every corner inside the existing doubled near-miss click radius.
+                cap = cfg["miss_radius_px"] * 2 / math.sqrt(2)
+                w, h = min(max(w, px(6)), cap), min(max(h, px(6)), cap)
                 c.coords(self.zoom, l - self.x0 - w, t - self.y0 - h, r - self.x0 + w, b - self.y0 + h)
-                c.itemconfigure(self.zoom, outline=color, fill=color, state="normal")
+                c.itemconfigure(self.zoom, outline=color, fill=CARD, stipple="", state="normal")
+                c.coords(self.zoom_label, (l + r) / 2 - self.x0, (t + b) / 2 - self.y0)
+                c.itemconfigure(self.zoom_label, text=state.label[:60], width=max(1, r - l + 2 * w - px(8)),
+                                state="normal")
                 c.coords(self.zoom_tag, (l + r) / 2 - self.x0, t - self.y0 - h - px(3))
                 c.itemconfigure(self.zoom_tag, text="enlarged target",
                                 fill=color, state="normal")
             else:
                 c.itemconfigure(self.zoom, state="hidden")
                 c.itemconfigure(self.zoom_tag, state="hidden")
+                c.itemconfigure(self.zoom_label, state="hidden")
             if cfg["highlight_targets"]:                    # the box is opt-in; dwell shows only the small gauge
                 m = px(2)
                 c.coords(self.rect, l - self.x0 - m, t - self.y0 - m, r - self.x0 + m, b - self.y0 + m)
@@ -128,7 +137,7 @@ class Overlay:
                 for item in (self.track, self.arc):
                     c.itemconfigure(item, state="hidden")
         else:
-            for item in (self.zoom, self.zoom_tag, self.rect, self.track, self.arc):
+            for item in (self.zoom, self.zoom_tag, self.zoom_label, self.rect, self.track, self.arc):
                 c.itemconfigure(item, state="hidden")
 
         self._draw_stabilization(c, cx, cy)

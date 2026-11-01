@@ -55,11 +55,12 @@ class ExtState:
 
 class OverlayState:
     """What the overlay should draw this frame (immutable snapshot, swapped atomically)."""
-    __slots__ = ("pos", "progress", "rect", "assisted", "tremor", "grown")
+    __slots__ = ("pos", "progress", "rect", "assisted", "tremor", "grown", "label")
 
-    def __init__(self, pos, progress, rect, assisted, tremor, grown=False):
+    def __init__(self, pos, progress, rect, assisted, tremor, grown=False, label=""):
         self.pos, self.progress, self.rect, self.assisted, self.tremor = pos, progress, rect, assisted, tremor
         self.grown = grown
+        self.label = label
 
 
 class PointerThread(threading.Thread):
@@ -408,8 +409,10 @@ class Engine(threading.Thread):
 
         radius = self._search_radius()
         nearby = (list(probe.nearby) if probe else []) + self.local.near(x, y, radius)
+        if probe and probe.under and not contains(probe.under.rect, (x, y)):
+            nearby.append(probe.under)
         target, assisted, nearest, nearest_d = None, False, None, 0.0
-        local = self.local.hit(pos[0], pos[1])
+        local = self.local.hit(x, y)
         if local is not None:
             target = local
         elif probe is not None:
@@ -427,16 +430,18 @@ class Engine(threading.Thread):
                 and contains(self._cur.rect, (x, y), margin=tol):
             target = self._cur             # hysteresis: tremor nudged us just over the edge
         texty = bool(probe and probe.texty)
-        if target is None and want_assist and not texty:
-            nearest, nearest_d = nearest_unambiguous(pos, nearby, radius)
-            if self.snap_on() and held and nearest is not None and nearest_d <= cfg["snap_radius_px"]:
+        under = local or (probe.under if probe and probe.under
+                          and contains(probe.under.rect, (x, y)) else None)
+        # Dwell hysteresis may retain a target outside its rectangle. It must not
+        # suppress the separate physical-click miss lookup at the real cursor.
+        if under is None and want_assist and not texty:
+            nearest, nearest_d = nearest_unambiguous((x, y), nearby, radius)
+            if target is None and self.snap_on() and held and nearest is not None and nearest_d <= cfg["snap_radius_px"]:
                 target, assisted = nearest, True
-        if probe is not None or local is not None or nearby:
-            self.hit_cache = HitCache((x, y), probe.ts if probe else now, (probe.under if probe else None) or local,
-                                      nearest if ((probe.under if probe else None) or local) is None else None,
-                                      nearest_d, texty)
+        self.hit_cache = HitCache((x, y), now if local or (nearest and nearest.source == "local")
+                                  else probe.ts if probe else now, under, nearest, nearest_d, texty)
         self._steer_pipeline(x, y, probe, local, nearest, nearest_d, texty, attract)
-        if m.settled and local is None and (target is None or not (probe and probe.under)):
+        if m.settled and local is None:
             self._request_probe(now, x, y, want_assist)            # our own controls are already known: no UIA call
 
         # dwell
@@ -459,10 +464,14 @@ class Engine(threading.Thread):
         elif ev == "fire" and target is not None:
             self._fire(target, assisted, (x, y), m, now)
 
-        if target is not None and ((self.dwell_on() or own) and self._gate_open or cfg["highlight_targets"]
+        visual = target
+        if visual is None and nearest is not None and nearest.key in self.miss.grown:
+            visual = nearest     # show enlargement at the miss location, even with snap/dwell off
+        if visual is not None and ((self.dwell_on() or own) and self._gate_open or cfg["highlight_targets"]
                                    or cfg["visual_enlarge"]):
-            self.overlay = OverlayState((x, y), progress if (self.dwell_on() or own) else 0.0, target.rect, assisted,
-                                        m.tremor, target.key in self.miss.grown)
+            self.overlay = OverlayState((x, y), progress if target and (self.dwell_on() or own) else 0.0,
+                                        visual.rect, assisted, m.tremor, visual.key in self.miss.grown,
+                                        visual.name or visual.ctype or "Target")
         else:
             self.overlay = None
         self.lab_targets = [t.rect for t in nearby[:12]] + ([target.rect] if target else [])
@@ -474,7 +483,7 @@ class Engine(threading.Thread):
 
     def _steer_pipeline(self, x, y, probe, local, nearest, nearest_d, texty, attract):
         """Tell the pointer pipeline whether we are near a button and what (if anything) may attract it."""
-        under = (probe.under if probe else None) or local
+        under = local or (probe.under if probe and probe.under and contains(probe.under.rect, (x, y)) else None)
         pipe = self.pipe
         pipe.near_button = bool(under is not None or (nearest is not None and nearest_d <= NEAR_BUTTON_PX))
         tgt = None
@@ -520,10 +529,8 @@ class Engine(threading.Thread):
         if not self.uia.ok or self._probe_future is not None or now - self._probe_ts < PROBE_MIN_GAP_S:
             return
         moved = math.hypot(x - self._probe_pos[0], y - self._probe_pos[1]) if self._probe_pos else 1e9
-        if moved < 3 and now - self._probe_ts < (1.0 if self.dwell.progress > 0 else 2.5):
-            return                                                 # nothing moved: the answer has not changed
-        if moved < 6 and now - self._probe_ts < 0.4:
-            return                                                 # a few pixels of drift: the target is the same
+        if moved < 6 and now - self._probe_ts < 0.2:
+            return   # refresh before the physical-click cache's 400 ms safety expiry
         self._probe_pos, self._probe_ts = (x, y), now
         radius = self._search_radius()
         self._probe_future = self.uia.submit(lambda s: s.probe(x, y, radius, nearby))

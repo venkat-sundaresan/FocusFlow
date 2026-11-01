@@ -49,7 +49,8 @@ def plausible_rect(rect, screen_area):
 
 def nearest_unambiguous(pt, targets, radius, margin=8.0):
     """Closest target within `radius` that is clearly closer than the runner-up, else (None, dist)."""
-    ranked = sorted(((dist_to_rect(pt, t.rect), t) for t in targets), key=lambda p: p[0])
+    unique = {t.key: t for t in targets}
+    ranked = sorted(((dist_to_rect(pt, t.rect), t) for t in unique.values()), key=lambda p: p[0])
     ranked = [p for p in ranked if p[0] <= radius]
     if not ranked:
         return None, 0.0
@@ -102,13 +103,13 @@ def decide_physical_click(cache, click, now, miss_radius, correct_enabled, max_a
         return "pass", None
     if math.hypot(click[0] - cache.pos[0], click[1] - cache.pos[1]) > max_drift:
         return "pass", None
-    if cache.under is not None:
+    if cache.under is not None and contains(cache.under.rect, click):
         return "manual_hit", cache.under
     near = cache.nearest
     if near is not None:
         is_grown = near.key in grown
         radius = miss_radius * grow_factor if is_grown else miss_radius
-        if cache.nearest_dist <= radius:
+        if max(cache.nearest_dist, dist_to_rect(click, near.rect)) <= radius:
             fix = (correct_enabled or is_grown) and not cache.texty
             return ("redirect" if fix else "miss"), near
     return "pass", None

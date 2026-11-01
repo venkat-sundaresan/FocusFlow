@@ -56,6 +56,12 @@ class AdaptivePointerTests(unittest.TestCase):
     def test_large_deliberate_swings_are_mostly_passed(self):
         self.assertGreater(self.p2p_ratio(2, 40, 1.0), 0.9)    # a 2 Hz, 40 px sweep is movement, not tremor
 
+    def test_oscillation_does_not_open_speed_adaptive_filter(self):
+        # Signed velocity estimation suppresses rectified tremor speed while the
+        # deliberate sweep/lag tests above continue to enforce responsiveness.
+        self.assertLess(self.p2p_ratio(8, 3), 0.68)
+        self.assertLess(self.p2p_ratio(12, 3), 0.55)
+
     def test_stronger_strength_filters_more(self):
         rng = random.Random(5)
         path = [(300 + 4 * math.sin(i * 0.5) + rng.uniform(-1, 1), 300) for i in range(300)]
@@ -291,7 +297,7 @@ class PipelineTests(unittest.TestCase):
         deltas = [(round(b - a, 3), 0) for a, b in zip(pos, pos[1:])]
         deltas = [(int(round(b)) - int(round(a)), 0) for a, b in zip(pos, pos[1:])]
         self.feed_os(pipe, deltas, t0=1004.0)
-        xs = [p[0] for p in placed[20:]]
+        xs = [500] + [p[0] for p in placed]   # complete suppression is valid: no SetCursorPos calls
         self.assertLessEqual(max(xs) - min(xs), 2)               # raw swings 4 px peak-to-peak
         st = pipe.stats()
         self.assertGreater(st["raw_distance"], 2 * st["stabilised_distance"])

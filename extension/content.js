@@ -94,10 +94,10 @@
   }
   function findNearest(x, y, radiusCss) {
     const now = performance.now();
-    if (nearCache.res && Math.hypot(nearCache.x - x, nearCache.y - y) < 2 && now - nearCache.at < 250) return nearCache.res;
+    if (nearCache.res && nearCache.radius === radiusCss && Math.hypot(nearCache.x - x, nearCache.y - y) < 2 && now - nearCache.at < 250) return nearCache.res;
     const ok = candidates().filter(c => verifiedHit(c, x, y));
     const res = C.nearestUnambiguous(x, y, ok, radiusCss);
-    nearCache = { x, y, at: now, res };
+    nearCache = { x, y, at: now, res, radius: radiusCss };
     return res;
   }
   function labelOf(el) {
@@ -163,13 +163,14 @@
   // text grows with it); it stays enlarged until the page reloads or "Undo adaptation" is pressed in the app.
   const ENGAGED_SCALE = 1.3, ASSIST_SCALE = 1.4, GROWN_SCALE = 1.25;
   const orig = new Map();            // el -> inline styles we replaced
-  const missCount = new WeakMap();
+  let missCount = new WeakMap();
   const grown = new Set();
   let engagedEl = null, engagedScale = 1;
   const PROPS = ['transform', 'transition', 'outline', 'outline-offset', 'position', 'z-index', 'display', 'box-shadow'];
   function paint(el) {
-    const s = Math.max(el === engagedEl ? engagedScale : 1, grown.has(el) ? GROWN_SCALE : 1);
-    if (s <= 1 && !grown.has(el)) {
+    const visible = cfg && cfg.enabled && cfg.adaptation_enabled && cfg.visual_enlarge;
+    const s = visible ? Math.max(el === engagedEl ? engagedScale : 1, grown.has(el) ? GROWN_SCALE : 1) : 1;
+    if (s <= 1) {
       const o = orig.get(el);
       if (o) { for (const p of PROPS) el.style.setProperty(p, o[p][0], o[p][1]); orig.delete(el); }
       return;
@@ -177,9 +178,11 @@
     if (!orig.has(el)) {
       const o = {};
       for (const p of PROPS) o[p] = [el.style.getPropertyValue(p), el.style.getPropertyPriority(p)];
+      o.baseTransform = getComputedStyle(el).transform;
       orig.set(el, o);
     }
-    const cs = getComputedStyle(el), base = orig.get(el).transform[0] || (cs.transform !== 'none' ? cs.transform : '');
+    const cs = getComputedStyle(el), saved = orig.get(el).baseTransform;
+    const base = saved !== 'none' ? saved : '';
     if (cs.display === 'inline') el.style.setProperty('display', 'inline-block', 'important');
     if (cs.position === 'static') el.style.setProperty('position', 'relative', 'important');
     el.style.setProperty('transition', 'transform 120ms ease-out, box-shadow 120ms', 'important');
@@ -192,7 +195,11 @@
   }
   function syncEnlarge(el, assisted) {
     const want = el && cfg && cfg.visual_enlarge && grown.has(el) ? el : null;
-    if (want === engagedEl) { if (want) { engagedScale = assisted ? ASSIST_SCALE : ENGAGED_SCALE; } return; }
+    if (want === engagedEl) {
+      const scale = assisted ? ASSIST_SCALE : ENGAGED_SCALE;
+      if (want && engagedScale !== scale) { engagedScale = scale; paint(want); }
+      return;
+    }
     const prev = engagedEl;
     engagedEl = want; engagedScale = assisted ? ASSIST_SCALE : ENGAGED_SCALE;
     if (prev) paint(prev);
@@ -201,19 +208,24 @@
   function recordMiss(el) {
     const n = (missCount.get(el) || 0) + 1;
     missCount.set(el, n);
-    if (cfg && cfg.adaptation_enabled && cfg.visual_enlarge && n >= (cfg.adapt_misses || 3) && !grown.has(el)) {
+    if (cfg && cfg.adaptation_enabled && n >= (cfg.adapt_misses || 3) && !grown.has(el)) {
       grown.add(el); paint(el);
       report('target_adapted', el, { reason: 'nearby_misses', note: 'enlarged on the page; reversible' });
     }
   }
   function resetMisses(el) { missCount.set(el, 0); }
   let epoch = null;
+  let visualEnabled = null;
   function syncEpoch() {                      // "Undo adaptation" in the desktop app clears page enlargements too
     if (!cfg || cfg.adapt_epoch == null) return;
-    if (epoch !== null && cfg.adapt_epoch !== epoch) {
+    if ((epoch !== null && cfg.adapt_epoch !== epoch) || !cfg.adaptation_enabled) {
+      engagedEl = null; engagedScale = 1;
+      missCount = new WeakMap();
       const els = [...grown]; grown.clear();
       for (const el of els) paint(el);
     }
+    const visible = !!(cfg.enabled && cfg.adaptation_enabled && cfg.visual_enlarge);
+    if (visible !== visualEnabled) { for (const el of grown) paint(el); visualEnabled = visible; }
     epoch = cfg.adapt_epoch;
   }
 
@@ -317,10 +329,15 @@
       resetMisses(hitEl);
       return;
     }
-    const res = findNearest(e.clientX, e.clientY, cfg.miss_radius / k);
+    // Query fresh geometry at click time; hover's cached snap radius may differ.
+    candCache.at = -Infinity; nearCache.res = null;
+    const res = findNearest(e.clientX, e.clientY, cfg.miss_radius * (cfg.adaptation_enabled ? 2 : 1) / k);
     if (!res.target) return;
     const textual = hasOwnText(e.target) || e.target.isContentEditable;   // never hijack a click aimed at text
-    const fix = cfg.near_miss_correct && !textual;
+    if (textual) return;
+    const adapted = cfg.adaptation_enabled && grown.has(res.target.el);
+    if (C.distToRect(e.clientX, e.clientY, res.target.rect) > cfg.miss_radius * (adapted ? 2 : 1) / k) return;
+    const fix = cfg.near_miss_correct || adapted;
     const r = res.target.rect, hw = Math.max((r.right - r.left) / 2, 1), hh = Math.max((r.bottom - r.top) / 2, 1);
     report('near_miss', res.target.el, { kind: 'click', corrected: fix,
       nx: +((e.clientX - (r.left + r.right) / 2) / hw).toFixed(2), ny: +((e.clientY - (r.top + r.bottom) / 2) / hh).toFixed(2) });

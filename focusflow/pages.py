@@ -81,7 +81,7 @@ class PointerAssistPage(Page):
                       "smoothed; quick deliberate movement stays responsive (lag never exceeds 8 px).")
         self.setting_switch(i1, "jitter_enabled", "Stabilise the pointer")
         self.setting_step(i1, "smoothing_strength", "Smoothing strength", 1, 0, 10, lambda v: f"{v} / 10",
-                          "5 is the original filter. Higher = steadier, slightly softer.")
+                          "5 is balanced smoothing. Higher = steadier, slightly softer.")
         self.setting_switch(i1, "show_stabilization", "Show raw hand vs steadied pointer",
                             "Draws your shaky hand path in red and the steadied pointer path in green, with a link line.")
         c2, i2 = card(self, "Target attraction",
@@ -99,7 +99,7 @@ class PointerAssistPage(Page):
                       "one unambiguous nearby target, never text. Undo any time.")
         self.setting_switch(i4, "adaptation_enabled", "Learn from nearby misses")
         self.setting_switch(i4, "near_miss_correct", "Fix near-miss clicks")
-        self.setting_switch(i4, "visual_enlarge", "Visibly enlarge target under pointer",
+        self.setting_switch(i4, "visual_enlarge", "Visibly enlarge repeatedly missed targets",
                             "Only targets you have just missed repeatedly are enlarged; nothing grows on a plain hover.")
         self.setting_step(i4, "adapt_misses", "Misses before enlarging", 1, 2, 6, lambda v: f"{v} in a row",
                           "Nearby misses on the same target, with no successful click between.")

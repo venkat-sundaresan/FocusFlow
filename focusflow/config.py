@@ -17,7 +17,7 @@ DEFAULTS = {
     "ml_model_path": "",         # empty = bundled/local stress-trained model location
     # ---- the values a profile controls (see profiles.PROFILE_KEYS); defaults == the Comfort profile ----
     "jitter_enabled": True,       # PointerLab AdaptivePointer on the real cursor
-    "smoothing_strength": 5,      # 0..10; 5 reproduces the original filter, higher = more smoothing
+    "smoothing_strength": 5,      # 0..10; 5 = baseline cutoff scale, higher = more smoothing
     "sensitivity": 5,             # 1..10, tremor-detector sensitivity (dwell tolerance)
     "dwell_enabled": True,
     "dwell_ms": 4000,             # 4 s: slow enough that resting a hand on a control never clicks it by accident

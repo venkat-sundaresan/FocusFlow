@@ -108,7 +108,17 @@ class UiSmokeTests(unittest.TestCase):
         self.assertTrue(ov.shown)
         state = ov.canvas.itemcget(ov.cursor, "state")
         self.assertEqual(state, "normal")
-        ov.update(OverlayState((200, 300), 0.4, (180, 280, 260, 320), True, 0.1, True))   # assisted + adapted target
+        self.app.cfg.set("visual_enlarge", True)
+        ov.update(OverlayState((200, 300), 0.4, (180, 280, 260, 320), True, 0.1, True, "Save"))
+        self.assertEqual(ov.canvas.itemcget(ov.zoom_label, "text"), "Save")
+        self.assertEqual(ov.canvas.itemcget(ov.zoom_label, "state"), "normal")
+        left, top, right, bottom = ov.canvas.coords(ov.zoom)
+        self.assertGreater(right - left, 80)
+        self.assertGreater(bottom - top, 40)
+        self.app.cfg.set("visual_enlarge", False)
+        ov.update(OverlayState((200, 300), 0, (180, 280, 260, 320), False, 0, True, "Save"))
+        self.assertEqual(ov.canvas.itemcget(ov.zoom_label, "state"), "hidden")
+        self.app.cfg.set("visual_enlarge", True)
         self.app.cfg.set_many({"large_cursor": False, "pointer_trails": False, "highlight_targets": False,
                                   "show_stabilization": False})
         ov.update(None)

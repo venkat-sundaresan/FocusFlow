@@ -21,7 +21,7 @@ BUILTIN = {
         },
     },
     "Comfort": {
-        "blurb": "Balanced stabilisation and dwell clicking. The original PointerLab filter, unchanged.",
+        "blurb": "Balanced stabilisation and dwell clicking with speed-adaptive smoothing.",
         "values": {
             "jitter_enabled": True, "smoothing_strength": 5, "sensitivity": 5,
             "dwell_enabled": True, "dwell_ms": 4000, "snap_enabled": True, "snap_radius_px": 36,
