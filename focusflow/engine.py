@@ -94,7 +94,8 @@ class Engine(threading.Thread):
         self.pipe = PointerPipeline(1.0, bounds=winapi.virtual_bounds(), apply=winapi.place_cursor)
         self.pipe.on_erratic = self._on_erratic
         self.pointer_thread = PointerThread(self)
-        self.miss = MissTracker()
+        self.miss = MissTracker(lambda: self.cfg["adapt_misses"])
+        self.adapt_epoch = 0           # bumped on "undo adaptation" so web pages drop their enlargements too
         self.mask = dict(profiles.FULL_MASK)      # experiment modes switch feature groups off
         self.overlay = None            # OverlayState | None, read by the UI thread
         self.lab_targets = []          # rects the Live Lab draws (target boundaries around the pointer)
@@ -458,7 +459,8 @@ class Engine(threading.Thread):
         elif ev == "fire" and target is not None:
             self._fire(target, assisted, (x, y), m, now)
 
-        if target is not None and ((self.dwell_on() or own) and self._gate_open or cfg["highlight_targets"]):
+        if target is not None and ((self.dwell_on() or own) and self._gate_open or cfg["highlight_targets"]
+                                   or cfg["visual_enlarge"]):
             self.overlay = OverlayState((x, y), progress if (self.dwell_on() or own) else 0.0, target.rect, assisted,
                                         m.tremor, target.key in self.miss.grown)
         else:
@@ -635,7 +637,7 @@ class Engine(threading.Thread):
                                   "corrected": action == "redirect"})
             if cache is not None and not cache.texty and self.miss.record(target.key, self.adapt_on()):
                 self.store.log_async("target_adapted", "desktop", self._label(target),
-                                     {"reason": "three_nearby_misses", "note": "hit area enlarged; reversible"})
+                                     {"reason": "nearby_misses", "note": "hit area enlarged; reversible"})
                 if self.on_adapted:
                     self.on_adapted(self._label(target))
             if action == "redirect":
@@ -656,4 +658,5 @@ class Engine(threading.Thread):
     def undo_adaptation(self):
         n = len(self.miss.grown)
         self.miss.clear()
+        self.adapt_epoch += 1
         return n

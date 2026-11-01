@@ -187,19 +187,27 @@ class ErraticDetector:
 
 
 class MissTracker:
-    """The original recordMiss rule: a nearby, unambiguous target missed three times in a row (with no
+    """The original recordMiss rule: a nearby, unambiguous target missed three times in a row (configurable) (with no
     successful hit between) gets a larger hit area. A success clears the streak. Reversible."""
 
-    def __init__(self):
+    def __init__(self, threshold_fn=None):
         self.counts = {}
         self.grown = set()
+        self.threshold_fn = threshold_fn          # () -> misses needed; None = the original three
+
+    @property
+    def threshold(self):
+        try:
+            return max(1, int(self.threshold_fn())) if self.threshold_fn else MISSES_TO_ADAPT
+        except (TypeError, ValueError):
+            return MISSES_TO_ADAPT
 
     def record(self, target_id, enabled=True):
         """Returns True exactly when this miss newly enlarges the target."""
         if target_id is None:
             return False
         self.counts[target_id] = self.counts.get(target_id, 0) + 1
-        if enabled and self.counts[target_id] >= MISSES_TO_ADAPT and target_id not in self.grown:
+        if enabled and self.counts[target_id] >= self.threshold and target_id not in self.grown:
             self.grown.add(target_id)
             return True
         return False

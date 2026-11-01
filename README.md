@@ -386,9 +386,9 @@ target").
 The erratic-movement detector only ever **recommends** stronger smoothing, and is described everywhere as a heuristic,
 not a medical assessment.
 
-### Target adaptation (native version of "enlarge after 3 nearby misses")
+### Target adaptation (native version of "enlarge after 2 nearby misses")
 
-FocusFlow cannot resize other programs' buttons, so adaptation enlarges the target's *hit area*: after 3 nearby,
+FocusFlow cannot resize other programs' buttons, so adaptation enlarges the target's *hit area*: after 2 nearby,
 unambiguous misses in a row (a success clears the streak) clicks within 2 × the normal radius are corrected onto that
 target. It never applies to text/document surfaces, is logged, shown with a thicker outline, and is undone from
 Pointer Assist.

@@ -109,7 +109,8 @@ class UiSmokeTests(unittest.TestCase):
         state = ov.canvas.itemcget(ov.cursor, "state")
         self.assertEqual(state, "normal")
         ov.update(OverlayState((200, 300), 0.4, (180, 280, 260, 320), True, 0.1, True))   # assisted + adapted target
-        self.app.cfg.set_many({"large_cursor": False, "pointer_trails": False, "highlight_targets": False})
+        self.app.cfg.set_many({"large_cursor": False, "pointer_trails": False, "highlight_targets": False,
+                                  "show_stabilization": False})
         ov.update(None)
         self.assertFalse(ov.shown)
 

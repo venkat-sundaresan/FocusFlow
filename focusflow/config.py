@@ -27,7 +27,8 @@ DEFAULTS = {
     "attraction_radius_px": 36,
     "near_miss_correct": True,    # redirect a physical click that landed just outside a target
     "miss_radius_px": 24,
-    "adaptation_enabled": True,   # 3 nearby misses in a row enlarge that target's hit area
+    "adaptation_enabled": True,   # `adapt_misses` nearby misses in a row enlarge that target's hit area
+    "adapt_misses": 3,            # misses in a row near one target before it is enlarged (2..6)
     "bounce_filter": False,       # swallow physical re-clicks that arrive faster than bounce_ms
     "bounce_ms": 120,
     "tolerance_px": 8,            # extra wander allowed while dwelling (grows with tremor)
@@ -46,6 +47,8 @@ DEFAULTS = {
     "pointer_trails": False,
     "trail_length": 24,
     "highlight_targets": False,
+    "show_stabilization": True,   # overlay: jagged raw hand path (red) vs the steadied pointer path (green)
+    "visual_enlarge": True,       # visibly magnify the target under the pointer (and any target you keep missing)
     "osk_enabled": False,
     "osk_dwell_ms": 700,
     "voice_enabled": False,

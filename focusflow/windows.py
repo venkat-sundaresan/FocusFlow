@@ -15,6 +15,9 @@ from .widgets import (px, ACCENT, ACCENT_DK, AMBER, BG, BLUE, BORDER, CARD, CARD
 
 RING, RING_ASSIST = "#FFE14D", "#FF4FD8"      # dwell ring: high contrast on both light and dark pages
 CURSOR_COLORS = {"yellow": "#FFE14D", "white": "#FFFFFF", "cyan": "#38E1FF", "black": "#101010"}
+RAW_COLOR, STEADY_COLOR = "#FF4040", "#3DFF7A"   # raw (shaky) hand vs steadied pointer
+STAB_TRAIL_S = 1.6
+ZOOM_GROWN = 1.55                                  # visible magnification of a repeatedly-missed target
 ARROW = ((0, 0), (0, 21), (5, 16.5), (9, 25), (13, 23), (9, 15), (16, 15))   # arrow tip at the hotspot
 
 
@@ -31,7 +34,17 @@ class Overlay:
         self.win.geometry(f"{self.w}x{self.h}{self.x0:+d}{self.y0:+d}")
         c = self.canvas = tk.Canvas(self.win, width=self.w, height=self.h, bg=KEY, highlightthickness=0)
         c.pack()
+        self.zoom = c.create_rectangle(0, 0, 0, 0, width=px(3), outline=RING, fill=RING, stipple="gray25", state="hidden")
         self.rect = c.create_rectangle(0, 0, 0, 0, width=px(2), outline=ACCENT)
+        self.raw_path = c.create_line(0, 0, 0, 0, 0, 0, width=2, fill=RAW_COLOR, state="hidden")
+        self.steady_path = c.create_line(0, 0, 0, 0, 0, 0, width=4, fill=STEADY_COLOR, capstyle="round", joinstyle="round",
+                                         state="hidden")
+        self.link = c.create_line(0, 0, 0, 0, width=1, fill=RAW_COLOR, dash=(3, 3), state="hidden")
+        self.raw_dot = c.create_oval(0, 0, 0, 0, width=3, outline=RAW_COLOR, state="hidden")
+        self.raw_tag = c.create_text(0, 0, text="your hand", fill=RAW_COLOR, font=("Segoe UI", 9, "bold"), anchor="nw",
+                                     state="hidden")
+        self.zoom_tag = c.create_text(0, 0, text="", fill="#FFFFFF", font=("Segoe UI", 9, "bold"), anchor="s", state="hidden")
+        self.raw_trail, self.steady_trail = deque(), deque()
         self.scan = c.create_rectangle(0, 0, 0, 0, width=px(4), outline=AMBER)
         # dwell gauge: a thin coloured arc over a slim dark underlay (contrast on light and dark pages), nothing else
         self.track = c.create_oval(0, 0, 0, 0, width=px(4), outline="#4A5362")
@@ -49,7 +62,11 @@ class Overlay:
     def _wanted(self, state):
         cfg = self.ui.app.cfg
         return (state is not None or cfg["large_cursor"] or cfg["pointer_trails"]
-                or self.ui.app.switch.current() is not None)
+                or self.ui.app.switch.current() is not None or self._stabilization_on())
+
+    def _stabilization_on(self):
+        app = self.ui.app
+        return bool(app.cfg["show_stabilization"] and app.engine.jitter_on())
 
     def _restyle(self):
         if self.shown:
@@ -63,6 +80,8 @@ class Overlay:
                 self.win.withdraw()
                 self.shown = False
                 self.trail.clear()
+                self.raw_trail.clear()
+                self.steady_trail.clear()
             return
         if not self.shown:
             self.win.deiconify()
@@ -78,6 +97,18 @@ class Overlay:
         if state is not None:
             color = RING_ASSIST if state.assisted else RING
             l, t, r, b = state.rect
+            if cfg["visual_enlarge"] and state.grown:       # only a target missed twice is visibly enlarged
+                k = ZOOM_GROWN
+                w, h = (r - l) * (k - 1) / 2, (b - t) * (k - 1) / 2
+                w, h = max(w, px(6)), max(h, px(6))
+                c.coords(self.zoom, l - self.x0 - w, t - self.y0 - h, r - self.x0 + w, b - self.y0 + h)
+                c.itemconfigure(self.zoom, outline=color, fill=color, state="normal")
+                c.coords(self.zoom_tag, (l + r) / 2 - self.x0, t - self.y0 - h - px(3))
+                c.itemconfigure(self.zoom_tag, text="enlarged target",
+                                fill=color, state="normal")
+            else:
+                c.itemconfigure(self.zoom, state="hidden")
+                c.itemconfigure(self.zoom_tag, state="hidden")
             if cfg["highlight_targets"]:                    # the box is opt-in; dwell shows only the small gauge
                 m = px(2)
                 c.coords(self.rect, l - self.x0 - m, t - self.y0 - m, r - self.x0 + m, b - self.y0 + m)
@@ -97,8 +128,10 @@ class Overlay:
                 for item in (self.track, self.arc):
                     c.itemconfigure(item, state="hidden")
         else:
-            for item in (self.rect, self.track, self.arc):
+            for item in (self.zoom, self.zoom_tag, self.rect, self.track, self.arc):
                 c.itemconfigure(item, state="hidden")
+
+        self._draw_stabilization(c, cx, cy)
 
         # switch-scanning focus
         nav = app.switch.current()
@@ -144,6 +177,45 @@ class Overlay:
         else:
             c.itemconfigure(self.cursor, state="hidden")
             c.itemconfigure(self.halo, state="hidden")
+
+    def _draw_stabilization(self, c, cx, cy):
+        """Make the smoothing visible: the jagged raw hand path (red) next to the steadied path (green)."""
+        items = (self.raw_path, self.steady_path, self.link, self.raw_dot, self.raw_tag)
+        raw = getattr(self.ui.app.engine.pipe, "raw", None)
+        if not self._stabilization_on() or raw is None:
+            self.raw_trail.clear()
+            self.steady_trail.clear()
+            for item in items:
+                c.itemconfigure(item, state="hidden")
+            return
+        now = time.perf_counter()
+        rx, ry = raw[0] - self.x0, raw[1] - self.y0
+        for trail, pt in ((self.raw_trail, (rx, ry)), (self.steady_trail, (cx, cy))):
+            if not trail or trail[-1][1:] != pt:
+                trail.append((now,) + pt)
+            while trail and now - trail[0][0] > STAB_TRAIL_S:
+                trail.popleft()
+        for item, trail in ((self.raw_path, self.raw_trail), (self.steady_path, self.steady_trail)):
+            if len(trail) >= 2:
+                c.coords(item, *[v for p in trail for v in p[1:]])
+                c.itemconfigure(item, state="normal")
+            else:
+                c.itemconfigure(item, state="hidden")
+        gap = math.hypot(rx - cx, ry - cy)
+        if gap >= 1.5:                                  # the pointer you got differs from the hand you moved
+            r = px(6)
+            c.coords(self.raw_dot, rx - r, ry - r, rx + r, ry + r)
+            c.coords(self.link, rx, ry, cx, cy)
+            c.coords(self.raw_tag, rx + r + 3, ry + r + 1)
+            c.itemconfigure(self.raw_tag, text=f"your hand  ({gap:.0f}px steadied)")
+            for item in (self.raw_dot, self.link, self.raw_tag):
+                c.itemconfigure(item, state="normal")
+        else:
+            for item in (self.raw_dot, self.link, self.raw_tag):
+                c.itemconfigure(item, state="hidden")
+        for item in (self.raw_path, self.steady_path, self.link, self.raw_dot, self.raw_tag, self.zoom_tag):
+            c.tag_raise(item)
+        c.tag_raise(self.cursor)
 
     def pump(self):
         try:

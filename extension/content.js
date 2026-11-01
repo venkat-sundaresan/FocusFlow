@@ -157,6 +157,66 @@
   }
   function clearOverlay() { if (ov && ov.shown) { ov.host.remove(); ov.shown = false; } }
 
+  // ---- visible enlargement ---------------------------------------------------------------------------------
+  // The button under the pointer is really scaled up on the page (CSS transform), so the help is visible.
+  // Nothing grows on a plain hover: only a target missed cfg.adapt_misses (default 3) times in a row is enlarged (the whole element, so its
+  // text grows with it); it stays enlarged until the page reloads or "Undo adaptation" is pressed in the app.
+  const ENGAGED_SCALE = 1.3, ASSIST_SCALE = 1.4, GROWN_SCALE = 1.25;
+  const orig = new Map();            // el -> inline styles we replaced
+  const missCount = new WeakMap();
+  const grown = new Set();
+  let engagedEl = null, engagedScale = 1;
+  const PROPS = ['transform', 'transition', 'outline', 'outline-offset', 'position', 'z-index', 'display', 'box-shadow'];
+  function paint(el) {
+    const s = Math.max(el === engagedEl ? engagedScale : 1, grown.has(el) ? GROWN_SCALE : 1);
+    if (s <= 1 && !grown.has(el)) {
+      const o = orig.get(el);
+      if (o) { for (const p of PROPS) el.style.setProperty(p, o[p][0], o[p][1]); orig.delete(el); }
+      return;
+    }
+    if (!orig.has(el)) {
+      const o = {};
+      for (const p of PROPS) o[p] = [el.style.getPropertyValue(p), el.style.getPropertyPriority(p)];
+      orig.set(el, o);
+    }
+    const cs = getComputedStyle(el), base = orig.get(el).transform[0] || (cs.transform !== 'none' ? cs.transform : '');
+    if (cs.display === 'inline') el.style.setProperty('display', 'inline-block', 'important');
+    if (cs.position === 'static') el.style.setProperty('position', 'relative', 'important');
+    el.style.setProperty('transition', 'transform 120ms ease-out, box-shadow 120ms', 'important');
+    el.style.setProperty('transform', `${base} scale(${s})`.trim(), 'important');
+    el.style.setProperty('z-index', '2147483000', 'important');
+    const live = el === engagedEl;
+    el.style.setProperty('outline', `${live ? 4 : 3}px ${live ? 'solid' : 'dashed'} ${live && curAssisted ? COLORS.assist : COLORS.ring}`, 'important');
+    el.style.setProperty('outline-offset', '2px', 'important');
+    el.style.setProperty('box-shadow', '0 6px 18px rgba(0,0,0,.45)', 'important');
+  }
+  function syncEnlarge(el, assisted) {
+    const want = el && cfg && cfg.visual_enlarge && grown.has(el) ? el : null;
+    if (want === engagedEl) { if (want) { engagedScale = assisted ? ASSIST_SCALE : ENGAGED_SCALE; } return; }
+    const prev = engagedEl;
+    engagedEl = want; engagedScale = assisted ? ASSIST_SCALE : ENGAGED_SCALE;
+    if (prev) paint(prev);
+    if (want) paint(want);
+  }
+  function recordMiss(el) {
+    const n = (missCount.get(el) || 0) + 1;
+    missCount.set(el, n);
+    if (cfg && cfg.adaptation_enabled && cfg.visual_enlarge && n >= (cfg.adapt_misses || 3) && !grown.has(el)) {
+      grown.add(el); paint(el);
+      report('target_adapted', el, { reason: 'nearby_misses', note: 'enlarged on the page; reversible' });
+    }
+  }
+  function resetMisses(el) { missCount.set(el, 0); }
+  let epoch = null;
+  function syncEpoch() {                      // "Undo adaptation" in the desktop app clears page enlargements too
+    if (!cfg || cfg.adapt_epoch == null) return;
+    if (epoch !== null && cfg.adapt_epoch !== epoch) {
+      const els = [...grown]; grown.clear();
+      for (const el of els) paint(el);
+    }
+    epoch = cfg.adapt_epoch;
+  }
+
   // ---- acting ------------------------------------------------------------------------------------------
   function activate(el) {
     const typing = el instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset', 'file', 'color', 'range', 'image'].includes(el.type)
@@ -175,7 +235,8 @@
     motion.feed(now, px, py);
     if (!gatePos) closeGate([px, py]);
     refreshConfig(false);
-    if (!cfg || !cfg.enabled || buttons) { dwell.reset(); cur = null; clearOverlay(); return; }
+    syncEpoch();
+    if (!cfg || !cfg.enabled || buttons) { dwell.reset(); cur = null; clearOverlay(); syncEnlarge(null); return; }
     const m = motion.analyze(now);
     if (!gateOpen && Math.hypot(px - gatePos[0], py - gatePos[1]) >= GATE_PX) gateOpen = true;
     const tolCss = (cfg.tolerance_px + 20 * m.tremor) / k;
@@ -223,11 +284,12 @@
       report('click_assisted', target.el, Object.assign(approach, { mode: 'assisted', method: assisted ? 'snap_dwell' : 'dwell', tremor: +m.tremor.toFixed(2) }));
       closeGate([px, py]);
     }
+    syncEnlarge(target ? target.el : null, assisted);
     if (target && gateOpen) draw(target, progress, assisted, last.x, last.y); else clearOverlay();
   }
 
   function start() { if (!timer) timer = setInterval(tick, TICK_MS); }
-  function stop() { if (timer) { clearInterval(timer); timer = null; } clearOverlay(); dwell.reset(); cur = null; }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } clearOverlay(); dwell.reset(); cur = null; syncEnlarge(null); }
 
   // ---- events --------------------------------------------------------------------------------------------
   addEventListener('mousemove', e => {
@@ -252,6 +314,7 @@
     if (hitEl) {
       const a = motion.takeApproach(now);
       if (a) report('manual_click', hitEl, Object.assign(a, { mode: 'manual' }));
+      resetMisses(hitEl);
       return;
     }
     const res = findNearest(e.clientX, e.clientY, cfg.miss_radius / k);
@@ -261,6 +324,7 @@
     const r = res.target.rect, hw = Math.max((r.right - r.left) / 2, 1), hh = Math.max((r.bottom - r.top) / 2, 1);
     report('near_miss', res.target.el, { kind: 'click', corrected: fix,
       nx: +((e.clientX - (r.left + r.right) / 2) / hw).toFixed(2), ny: +((e.clientY - (r.top + r.bottom) / 2) / hh).toFixed(2) });
+    recordMiss(res.target.el);
     if (fix) {
       const a = motion.takeApproach(now) || { path_px: 0, reversals: 0, duration_ms: 0 };
       e.preventDefault(); e.stopImmediatePropagation();

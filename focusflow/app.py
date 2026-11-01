@@ -192,7 +192,9 @@ class App:
                 "tolerance_px": c["tolerance_px"], "sensitivity": c["sensitivity"],
                 "snap_enabled": e.snap_on(), "snap_radius": c["snap_radius_px"],
                 "near_miss_correct": e.correct_on(), "miss_radius": c["miss_radius_px"],
-                "log_names": c["log_target_names"]}
+                "log_names": c["log_target_names"],
+                "visual_enlarge": c["visual_enlarge"], "adaptation_enabled": e.adapt_on(), "adapt_misses": c["adapt_misses"],
+                "adapt_epoch": e.adapt_epoch}
 
     # -- voice ---------------------------------------------------------------------------------------------------
     def _sync_voice(self):

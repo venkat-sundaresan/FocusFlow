@@ -196,6 +196,11 @@ class TargetTests(unittest.TestCase):
         m.clear()
         self.assertFalse(m.grown)
 
+    def test_threshold_is_configurable(self):
+        m = MissTracker(lambda: 2)
+        self.assertFalse(m.record("a"))
+        self.assertTrue(m.record("a"))
+
     def test_disabled_adaptation_never_enlarges(self):
         m = MissTracker()
         self.assertFalse(any(m.record("a", enabled=False) for _ in range(5)))

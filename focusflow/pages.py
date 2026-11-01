@@ -82,6 +82,8 @@ class PointerAssistPage(Page):
         self.setting_switch(i1, "jitter_enabled", "Stabilise the pointer")
         self.setting_step(i1, "smoothing_strength", "Smoothing strength", 1, 0, 10, lambda v: f"{v} / 10",
                           "5 is the original filter. Higher = steadier, slightly softer.")
+        self.setting_switch(i1, "show_stabilization", "Show raw hand vs steadied pointer",
+                            "Draws your shaky hand path in red and the steadied pointer path in green, with a link line.")
         c2, i2 = card(self, "Target attraction",
                       "A gentle magnetic pull toward one clearly-nearest button when you slow down near it. "
                       "Never over text or documents, never when two targets are close.")
@@ -93,10 +95,14 @@ class PointerAssistPage(Page):
         self.setting_step(i3, "dwell_cooldown_ms", "Repeat-click guard", 250, 500, 5000, lambda v: f"{v / 1000:.2f} s",
                           "A just-clicked target must be left before it can fire again.")
         c4, i4 = card(self, "Target adaptation",
-                      "A target you narrowly miss three times in a row gets a larger hit area. Safe by design: only "
+                      "A target you narrowly miss several times in a row is enlarged (button or text link) and gets a larger hit area. Safe by design: only "
                       "one unambiguous nearby target, never text. Undo any time.")
         self.setting_switch(i4, "adaptation_enabled", "Learn from nearby misses")
         self.setting_switch(i4, "near_miss_correct", "Fix near-miss clicks")
+        self.setting_switch(i4, "visual_enlarge", "Visibly enlarge target under pointer",
+                            "Only targets you have just missed repeatedly are enlarged; nothing grows on a plain hover.")
+        self.setting_step(i4, "adapt_misses", "Misses before enlarging", 1, 2, 6, lambda v: f"{v} in a row",
+                          "Nearby misses on the same target, with no successful click between.")
         self.setting_step(i4, "miss_radius_px", "Hit-area radius", 4, 8, 80, lambda v: f"{v} px")
         r = row(i4, "Enlarged targets", None)
         self.adapt_lbl = tk.Label(r, text="0", font=font(11, bold=True), bg=CARD, fg=FG)
