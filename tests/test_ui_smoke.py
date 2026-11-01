@@ -4,6 +4,8 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 HOME = tempfile.mkdtemp(prefix="ffui")
@@ -25,6 +27,11 @@ class UiSmokeTests(unittest.TestCase):
     def setUpClass(cls):
         from focusflow import winapi
         from focusflow.app import App
+        # Discovery may already have imported config; never use the user's actual settings/database.
+        for target in ("focusflow.app.APP_DIR", "focusflow.config.APP_DIR"):
+            patcher = mock.patch(target, Path(HOME))
+            patcher.start()
+            cls.addClassCleanup(patcher.stop)
         winapi.set_dpi_aware()
         cls.app = App()
         cls.ui = cls.app.ui
@@ -66,6 +73,17 @@ class UiSmokeTests(unittest.TestCase):
             if self.app.tray is not None:
                 self.app.tray.stop()
                 self.app.tray = None
+
+    def test_live_ml_controls_start_disabled_in_shadow_mode(self):
+        self.ui.main.open("assist")
+        self.pump()
+        page = self.ui.main.pages["assist"]
+        page.refresh()
+        self.assertEqual(set(page.ml_mode.buttons), {"shadow", "experimental"})
+        self.assertFalse(self.app.cfg["ml_enabled"])
+        self.assertEqual(self.app.cfg["ml_mode"], "shadow")
+        self.assertIsNone(self.app.engine.ml.thread)
+        self.assertIn("off", page.ml_label.cget("text"))
 
     def test_profile_cards_rebuild_when_a_custom_profile_is_saved(self):
         from focusflow import profiles

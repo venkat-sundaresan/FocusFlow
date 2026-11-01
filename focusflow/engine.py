@@ -12,6 +12,7 @@ import time
 from . import caption, profiles, winapi
 from .dwell import Dwell
 from .motion import MotionAnalyzer
+from .ml.live import LiveML, SmoothingPolicy, INTERVAL_S
 from .pointer import MissTracker, PointerPipeline
 from .targets import (HitCache, contains, decide_physical_click, nearest_unambiguous, normalized_offset,
                       snap_point)
@@ -130,6 +131,13 @@ class Engine(threading.Thread):
         self._flushed = self.pipe.stats()
         self._flush_t0 = time.time()
         self.status = {"tremor": 0.0, "speed": 0, "target": None}
+        self._ml_lock = threading.RLock()
+        self.ml = LiveML()
+        self._ml_policy = SmoothingPolicy()
+        self._ml_signature = None
+        self._ml_epoch = None
+        self._ml_submit_at = -math.inf
+        self._ml_manual = False
         cfg.on_change(self._on_setting)
         self.apply_features()
 
@@ -145,6 +153,60 @@ class Engine(threading.Thread):
             self.apply_features()
         if key == "adaptation_enabled" and not self.cfg["adaptation_enabled"]:
             self.miss.clear()
+        if key in self.FEATURE_KEYS or key in ("active_profile", "ml_enabled", "ml_mode", "ml_model_path"):
+            with self._ml_lock:
+                if key.startswith("ml_"):
+                    self._ml_manual = False
+                elif self.cfg["ml_enabled"]:
+                    self._ml_manual = True
+                self._reset_ml_locked()
+
+    def _reset_ml_locked(self):
+        self._ml_policy.reset()
+        self.pipe.set_ml_adjustment(0, 0)
+        self.pipe.enable_ml_capture(False)
+        self._ml_signature = None
+        self._sync_ml_locked()
+
+    def _sync_ml_locked(self):
+        signature = (bool(self.cfg["ml_enabled"] and self.active and not self.pipe_faulted
+                          and self.running and self.session is None), self.cfg["ml_mode"], self.cfg["ml_model_path"])
+        if signature != self._ml_signature:
+            self._ml_signature = signature
+            self._ml_policy.reset()
+            self.pipe.set_ml_adjustment(0, 0)
+            self.pipe.enable_ml_capture(signature[0])
+            self._ml_epoch = self.pipe.ml_epoch
+            self.ml.configure(*signature)
+
+    def ml_status(self):
+        with self._ml_lock:
+            status = self.ml.view()
+            status["manual_override"] = self._ml_manual
+            status["extra_smoothing"] = self.pipe.ml_extra
+            return status
+
+    def _ml_tick(self, now, motion, dragging=False):
+        with self._ml_lock:
+            self._sync_ml_locked()
+            if self.pipe.ml_epoch != self._ml_epoch:
+                self._ml_policy.reset()
+                self.pipe.set_ml_adjustment(0, 0)
+                self.ml.configure(*self._ml_signature)
+                self._ml_epoch = self.pipe.ml_epoch
+            if self._ml_signature[0] and now - self._ml_submit_at >= INTERVAL_S:
+                self._ml_submit_at = now
+                _, samples = self.pipe.ml_snapshot()
+                if samples and samples[-1][0] - samples[0][0] >= 2:
+                    self.ml.submit(samples)
+            view = self.ml.view(now)
+            eligible = (self.active and self.jitter_on() and not self.pipe_faulted and not self._ml_manual
+                        and self.session is None and not dragging)
+            extra = self._ml_policy.update(now, view, eligible,
+                                           intentional=motion.intentional or self.pipe.speed >= 250)
+            extra = min(extra, max(0, 10 - self.cfg["smoothing_strength"]))
+            # If the engine stalls, the hook/125 Hz pointer tick independently expires this lease.
+            self.pipe.set_ml_adjustment(extra, (now + 0.1) * 1000)
 
     # feature groups = profile setting AND experiment mask
     def jitter_on(self):
@@ -170,12 +232,13 @@ class Engine(threading.Thread):
 
     def apply_features(self):
         """Push the effective settings into the pointer pipeline."""
-        if not self.active or self.pipe_faulted:
-            self.pipe.configure(False, 1.0, 0)
-            return
-        self.pipe.configure(self.jitter_on(), profiles.cutoff_scale(self.cfg["smoothing_strength"]),
-                            self.attraction())
-        self.pipe.attract_radius = self.cfg["attraction_radius_px"]
+        with self._ml_lock:
+            if not self.active or self.pipe_faulted:
+                self.pipe.configure(False, 1.0, 0)
+                return
+            self.pipe.configure(self.jitter_on(), profiles.cutoff_scale(self.cfg["smoothing_strength"]),
+                                self.attraction())
+            self.pipe.attract_radius = self.cfg["attraction_radius_px"]
 
     @property
     def active(self):
@@ -198,6 +261,8 @@ class Engine(threading.Thread):
     def set_suspended(self, value):
         self.suspended = bool(value)
         self.apply_features()
+        with self._ml_lock:
+            self._reset_ml_locked()
 
     def _close_gate(self):
         """Require deliberate pointer movement before the next dwell (a resting pointer is not intent)."""
@@ -210,6 +275,8 @@ class Engine(threading.Thread):
         traceback.print_exc()
         self.faults += 1
         self.pipe_faulted = True
+        with self._ml_lock:
+            self._reset_ml_locked()
         try:
             self.pipe.configure(False, 1.0, 0)
         except Exception:
@@ -248,6 +315,10 @@ class Engine(threading.Thread):
     def stop(self):
         self.running = False
         self.pointer_thread.running = False
+        with self._ml_lock:
+            self.pipe.enable_ml_capture(False)
+            self.pipe.set_ml_adjustment(0, 0)
+            self.ml.stop()
 
     def _foreground(self, now):
         if now - self._fg[0] > 0.25:
@@ -292,6 +363,17 @@ class Engine(threading.Thread):
         self._refresh_environment(now, x, y)
         self.motion.feed(now, x, y)
         m = self.motion.analyze(now)
+        try:
+            self._ml_tick(now, m, dragging=winapi.left_button_down())
+        except Exception as exc:
+            # Optional ML failure must never disable the ordinary assistance pipeline.
+            with self._ml_lock:
+                self.pipe.set_ml_adjustment(0, 0)
+                self.pipe.enable_ml_capture(False)
+                self._ml_policy.reset()
+                self.ml.fail(f"ML controller unavailable: {type(exc).__name__}")
+                self._ml_epoch = self.pipe.ml_epoch
+                self._ml_manual = True
         self.status["tremor"], self.status["speed"] = round(m.tremor, 2), int(m.speed)
         self._flush_stats()
         cfg = self.cfg

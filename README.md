@@ -44,9 +44,9 @@ Training can reuse a downloaded bundle with `--base-model artifacts/motion-demo/
 dataset SHA-256, dependency versions, and group membership of each split.
 
 No labeled recordings were supplied with this repository, so the generated model is a **synthetic
-demonstration**. It is not validated for people with tremor and does not change cursor movement,
+demonstration**. It is not validated for people with tremor. Offline commands do not change cursor movement,
 dwell timing, or click decisions. Class scores are uncalibrated, and real signals outside the training
-distribution can receive incorrect high scores. The existing filters remain the desktop runtime.
+distribution can receive incorrect high scores. Optional live integration is described below.
 
 ### Train on real pointer recordings
 
@@ -153,14 +153,92 @@ Measured synthetic run (generator seed 2026, split seed 42): 240 sessions / 720 
 The stress-trained Chronos head has higher tremor-like recall (91.67% versus 85.42%) but more false
 positives than the stress-trained baseline. Its remaining false positives are two intentional-with-
 oscillation windows and one stop-start window; three low-amplitude and one amplitude-modulated
-tremor-like windows are missed. No winner is selected or installed into the cursor runtime.
+tremor-like windows are missed. The evaluation command does not enable live cursor adjustments.
 
 These results describe a single synthetic split. Challenge sessions are independent draws from the
 same scenario families as training, not unseen scenario types or real participants. Windows within a
 session are correlated. Labels follow the simulation: deliberate movement with oscillations remains
 `intentional`, while noisy stationary input is `steady`; low-amplitude signals can be ambiguous. The
 results are not clinical validation or evidence of real-world accessibility benefit. Existing datasets,
-models, commands, seven-feature ordering, and cursor behaviour are preserved.
+models, commands and seven-feature ordering are preserved. Cursor behaviour is unchanged by default.
+
+### Optional live Windows ML
+
+Pointer Assist → **Local ML (experimental)** has an enable switch, Shadow/Experimental selection,
+model-folder picker, prediction, model state, inference latency, and the currently added smoothing.
+ML starts **disabled**; its default mode is **Shadow**. Enabling shadow classification leaves pointer
+output unchanged. Missing optional packages or weights produce an error status and retain normal assistance.
+
+Install the ML packages into the **same Python environment that launches the desktop app**. Python 3.11
+is the environment used for the local ML tests and benchmark; native Windows behavior still requires testing:
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-ml.txt
+.\.venv\Scripts\python.exe -m focusflow --show
+```
+
+The default model directory is `artifacts/motion-stress-v1/model`, relative to the project, independent of
+the working directory. It reuses the existing stress-trained `classifier.json` and its `backbone/`.
+Generated stress artifacts are gitignored: when moving to another PC, copy that existing **whole model
+directory** or select its location with **Choose model folder**. Live ML never downloads weights,
+re-trains, substitutes the original demo classifier, or modifies the model files. The original offline
+commands still work; `resample_velocity` is shared between CSV and live preprocessing, and the seven
+engineered features and trained 519-feature head are unchanged.
+
+Acquisition uses timestamped **integrated raw input** from the existing pointer pipeline, before filtering
+or attraction, rather than polling the filtered OS cursor. The hook only appends a decimated scalar tuple
+to an optional 1,024-sample ring. The 125 Hz pointer thread supplies stationary samples during idle time.
+The engine submits a snapshot at most twice per second to a queue with **one pending job**; a new snapshot
+replaces an older pending snapshot. Only the dedicated worker imports ML dependencies, resamples a rolling
+two-second window to 60 Hz, computes features, and runs the saved classifier. CPU inference uses one Torch
+thread. Sampling gaps over 100 ms, teleports and DPI changes require a fresh valid window. Coordinates
+are divided by DPI scale exactly as in training. Raw data stays in bounded RAM buffers; it is not written
+to the database, logged, or transmitted. Disabling ML clears acquisition and queued data and invalidates
+in-flight results; an already-running native inference cannot be forcibly interrupted.
+
+To try adjustment, first check that Shadow reaches **ready** with fresh predictions, then explicitly select
+**Experimental**. Its policy is deliberately limited:
+
+- Three distinct `tremor_like` predictions with score ≥0.85 spanning at least one second activate an adjustment.
+  These overlapping windows and uncalibrated scores are a heuristic, not independent confidence estimates.
+- Extra smoothing ramps at 0.5 strength levels/second, adds at most two levels above the user's setting, and
+  never exceeds strength 10. Scores below 0.55 or a steady label unlatch and decay the adjustment at one level/second.
+- An intentional label, the existing intentional-motion heuristic, raw speed ≥250 logical pixels/second,
+  dragging, disabled jitter reduction or an experiment task suppresses the adjustment. The filter's original
+  eight-pixel scaled lag cap, dwell rules, attraction and click policy are untouched.
+- Inference exceeding 250 ms or results more than one second old are unavailable. This also applies while
+  an over-budget inference is still running. Failure/absence returns to baseline on the next engine tick.
+  Each applied adjustment has a 100 ms lease, independently expired by the hook/pointer thread if engine
+  refreshes stop; this is a bounded fallback, not a hard real-time guarantee.
+- Manual smoothing/profile changes latch a manual override. Pause/emergency stop invalidates outstanding
+  predictions and clears the adjustment synchronously. Resuming assistance restores the ordinary filter;
+  toggle ML off/on to explicitly re-arm experimental adjustment. Temporary UI suspension also clears ML state.
+
+Global settings are `ml_enabled`, `ml_mode` and `ml_model_path`; they are not saved into pointer profiles.
+No ML prediction writes `smoothing_strength`. Keep the normal emergency shortcut **Ctrl+Alt+Shift+F** available.
+
+Reproduce the tests and worker benchmark:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+node --test tests/core.test.js
+.\.venv\Scripts\python.exe -m focusflow.ml.benchmark_live --output artifacts/live-benchmark-new.json
+```
+
+Measured here with the saved stress model on macOS 26.6.2 ARM64, Python 3.11.1, one Torch thread, three
+warm-up windows and 30 measured windows at 2 Hz: **19.63 ms median / 21.81 ms p95 / 21.88 ms maximum**
+preprocessing+inference latency. Observed queue-to-result p95 was **23.49 ms**; all 30 results were accepted
+with zero pending-job drops. The benchmark process consumed **0.552 CPU seconds over 15.144 wall seconds**,
+or **3.65% of one logical core**, including its synthetic-input/polling harness. Initial model loading took
+3.41 seconds and is excluded from steady-state CPU/latency. Full measurements are in
+`artifacts/live-ml-benchmark-verified.json`. The benchmark waveform was classified intentional; this timing
+workload is not a labeled accuracy evaluation.
+
+These timings exclude the Windows hook, desktop UI, and engine. Windows-only tests are skipped on other
+platforms, not counted as successful hardware validation. Actual Windows/GIL scheduling, physical mouse
+behavior, perceived latency, and live classification accuracy remain unverified. The model is trained on
+synthetic data, can misclassify movement, and has no clinical validation. Shadow mode is the default for this reason.
 
 ## Run it
 

@@ -12,6 +12,9 @@ SCHEMA_VERSION = 3
 DEFAULTS = {
     "schema_version": SCHEMA_VERSION,
     "enabled": True,
+    "ml_enabled": False,          # opt in; no model imports or raw acquisition while disabled
+    "ml_mode": "shadow",         # shadow | experimental; not part of saved pointer profiles
+    "ml_model_path": "",         # empty = bundled/local stress-trained model location
     # ---- the values a profile controls (see profiles.PROFILE_KEYS); defaults == the Comfort profile ----
     "jitter_enabled": True,       # PointerLab AdaptivePointer on the real cursor
     "smoothing_strength": 5,      # 0..10; 5 reproduces the original filter, higher = more smoothing

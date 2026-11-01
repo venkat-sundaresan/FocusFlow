@@ -10,6 +10,9 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from unittest import mock
 
+if sys.platform != "win32":
+    raise unittest.SkipTest("desktop server/accessibility integration requires Windows APIs")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from focusflow import voice, winapi

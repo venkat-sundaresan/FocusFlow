@@ -114,6 +114,26 @@ class PointerAssistPage(Page):
         self.setting_step(i6, "tolerance_px", "Hover wander allowed", 2, 2, 40, lambda v: f"{v} px",
                           "Extra drift tolerated while dwelling; grows automatically with tremor.")
         self.grid_cards([c1, c2, c3, c4, c5, c6])
+        ml_card, ml_inner = card(self, "Local ML (experimental)",
+                                "Synthetic-trained motion classification. Shadow mode observes only. "
+                                "Experimental mode may add up to two smoothing levels; it never changes clicks.", wrap=700)
+        ml_card.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(0, 14))
+        self.setting_switch(ml_inner, "ml_enabled", "Enable local ML")
+        self.ml_mode = Segmented(ml_inner, self.win, [("shadow", "Shadow"), ("experimental", "Experimental")],
+                                 lambda: self.cfg["ml_mode"], lambda v: self.app.change_setting("ml_mode", v))
+        self.ml_mode.pack(anchor="w", pady=8)
+        choose = Btn(ml_inner, "Choose model folder", self.choose_ml_model, "ghost", 10, 12, 5)
+        choose.pack(anchor="w")
+        self.win.reg(choose, "Choose model folder", self.choose_ml_model)
+        self.ml_label = tk.Label(ml_inner, text="ML off", font=font(10), bg=CARD, fg=MUTED,
+                                 justify="left", anchor="w", wraplength=px(700))
+        self.ml_label.pack(fill="x", pady=8)
+
+    def choose_ml_model(self):
+        from tkinter import filedialog
+        folder = filedialog.askdirectory(parent=self.winfo_toplevel(), title="Select a classifier.json + backbone folder")
+        if folder:
+            self.app.change_setting("ml_model_path", folder)
 
     def undo_adaptation(self):
         n = self.app.engine.undo_adaptation()
@@ -121,6 +141,18 @@ class PointerAssistPage(Page):
 
     def refresh(self):
         super().refresh()
+        self.ml_mode.refresh()
+        status = self.app.engine.ml_status()
+        prediction = status["prediction"]
+        label = prediction["label"] if prediction else "waiting"
+        latency = f"{status['latency_ms']:.1f} ms" if status["latency_ms"] is not None else "—"
+        text = (f"{status['state']} | {label} | inference: {latency} | added smoothing: {status['extra_smoothing']:.2f}\n"
+                f"Model: {status['model']}")
+        if status["manual_override"]:
+            text += "\nManual override: toggle ML off/on to re-arm experimental adjustment."
+        if status["error"]:
+            text += "\n" + status["error"]
+        self.ml_label.config(text=text)
         n = str(len(self.app.engine.miss.grown))
         if self.adapt_lbl.cget("text") != n:
             self.adapt_lbl.config(text=n)

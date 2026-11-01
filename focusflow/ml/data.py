@@ -11,6 +11,26 @@ SECONDS = 2
 STEPS = HZ * SECONDS
 
 
+def resample_velocity(samples, start, dpi_scale=1.0):
+    """Shared offline/live 2-second preprocessing; input rows are (seconds, x, y).
+
+    No extrapolation or interpolation across missing input. Live acquisition supplies
+    stationary samples while the pointer is idle, rather than inventing them here.
+    """
+    a = np.asarray(samples, dtype=np.float64)
+    if (a.ndim != 2 or a.shape[1] != 3 or len(a) < 2 or not np.isfinite(a).all()
+            or not np.isfinite(start) or not np.isfinite(dpi_scale) or dpi_scale <= 0):
+        raise ValueError("Invalid timestamped pointer window or DPI scale")
+    gaps = np.diff(a[:, 0])
+    if np.any(gaps <= 0) or np.any(gaps > 0.10000001):
+        raise ValueError("Pointer timestamps must increase with gaps <=100 ms")
+    grid = start + np.arange(STEPS + 1) / HZ
+    if a[0, 0] > grid[0] + 1e-8 or a[-1, 0] < grid[-1] - 1e-8:
+        raise ValueError("Need a complete 2-second window")
+    xy = np.array([np.interp(grid, a[:, 0], a[:, axis] / dpi_scale) for axis in (1, 2)])
+    return np.diff(xy, axis=1) * HZ
+
+
 @dataclass
 class Windows:
     velocity: np.ndarray  # [window, axis, time], logical pixels/second
@@ -63,9 +83,7 @@ def read_windows(path, labeled=True):
             count = int((segment[-1, 0] - segment[0, 0] + 1e-8) // SECONDS)
             for i in range(count):
                 start = segment[0, 0] + i * SECONDS
-                grid = start + np.arange(STEPS + 1) / HZ
-                xy = np.array([np.interp(grid, segment[:, 0], segment[:, axis]) for axis in (1, 2)])
-                velocities.append(np.diff(xy, axis=1) * HZ)
+                velocities.append(resample_velocity(segment, start))
                 labels.append(label)
                 groups.append(group)
                 sessions.append(session)

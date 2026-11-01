@@ -306,6 +306,14 @@ class PointerPipeline:
         self._last_event = self._last_sample = self._last_tick = -1e9
         self._dirty = False
         self.speed = 0.0
+        # Optional, bounded acquisition only. No ML imports, queues or inference in the hook.
+        self.ml_capture = False
+        self.ml_raw = deque(maxlen=1024)
+        self.ml_epoch = 0
+        self._ml_sample_ms = -math.inf
+        self.ml_extra = 0.0
+        self._ml_expires_ms = 0.0
+        self._base_cutoff_scale = 1.0
 
     # -- configuration -----------------------------------------------------------------------------
     def configure(self, smoothing, cutoff_scale, attraction=0):
@@ -316,14 +324,53 @@ class PointerPipeline:
                 self.raw = self.out = None
                 self.cursor = None
                 self.attractor.reset()
+                self._reset_ml_samples()
             self.smoothing = bool(smoothing)
             self.owns_cursor = owns
             self.attract_strength = attraction if owns else 0
-            self.filter.cutoff_scale = cutoff_scale
+            self._base_cutoff_scale = self.filter.cutoff_scale = cutoff_scale
+            self.ml_extra = 0.0
 
     def set_scale(self, scale):
         """Display scale changed (pointer moved to a monitor with a different DPI). Caller holds the lock."""
         self.scale = self.filter.scale = self.attractor.scale = float(scale)
+        self._reset_ml_samples()
+        self.set_ml_adjustment(0, 0)
+
+    def _reset_ml_samples(self):
+        self.ml_raw.clear()
+        self.ml_epoch += 1
+        self._ml_sample_ms = -math.inf
+        self.ml_extra = 0.0
+        self.filter.cutoff_scale = self._base_cutoff_scale
+
+    def enable_ml_capture(self, enabled):
+        with self.lock:
+            if bool(enabled) != self.ml_capture:
+                self.ml_capture = bool(enabled)
+                self._reset_ml_samples()
+
+    def _capture_ml_raw(self, t):
+        if self.ml_capture and self.raw is not None and t - self._ml_sample_ms >= self.SAMPLE_MS:
+            self.ml_raw.append((t / 1000.0, self.raw[0], self.raw[1], self.scale))
+            self._ml_sample_ms = t
+
+    def ml_snapshot(self):
+        """Called only by the engine, at most twice per second; timestamps are monotonic seconds."""
+        with self.lock:
+            return self.ml_epoch, tuple(self.ml_raw)
+
+    def set_ml_adjustment(self, extra, expires_ms):
+        """Temporary smoothing-only lease; does not enable assistance or change settings."""
+        with self.lock:
+            self.ml_extra = max(0.0, min(2.0, float(extra))) if self.smoothing else 0.0
+            self._ml_expires_ms = expires_ms
+            self.filter.cutoff_scale = self._base_cutoff_scale * 2 ** (-self.ml_extra / 3)
+
+    def _expire_ml(self, t):
+        if self.ml_extra and (t >= self._ml_expires_ms or self.speed >= 250):
+            self.ml_extra = 0.0
+            self.filter.cutoff_scale = self._base_cutoff_scale
 
     def reset_stats(self):
         self.raw_motion, self.out_motion = MotionTracker(), MotionTracker()
@@ -374,6 +421,7 @@ class PointerPipeline:
         self.trace.append((t, self.raw[0], self.raw[1], self.out[0], self.out[1], jitter))
 
     def _sample(self, t):
+        self._expire_ml(t)
         self.out = self.filter.sample(self.raw, t, self.near_button) if self.smoothing else self.raw
         self._last_sample = t
         self._dirty = False
@@ -395,6 +443,9 @@ class PointerPipeline:
     def on_move(self, x, y, t):
         """Hook thread. Returns True when the event must be swallowed."""
         with self.lock:
+            if self.raw is None or (self.cursor is not None and
+                    math.hypot(x - self.cursor[0], y - self.cursor[1]) > self.JUMP_PX * self.scale):
+                self._reset_ml_samples()
             if self.cursor is None or t - self._last_event > GAP_RESET_MS \
                     or math.hypot(x - self.cursor[0], y - self.cursor[1]) > self.JUMP_PX * self.scale:
                 # first event, long pause or teleport (tablet, remote desktop, another app moved the
@@ -406,10 +457,12 @@ class PointerPipeline:
                 self._last_event = self._last_sample = t
                 self._dirty = False
                 self.trace.append((t, x, y, x, y, False))
+                self._capture_ml_raw(t)
                 return False
             if (x, y) == self.cursor:
                 return False
             self.raw = self._clamp((self.raw[0] + (x - self.cursor[0]), self.raw[1] + (y - self.cursor[1])))
+            self._capture_ml_raw(t)
             gap = t - self._last_event
             self._last_event = t
             if gap > 0:
@@ -431,6 +484,8 @@ class PointerPipeline:
     def tick(self, t):
         """~125 Hz. Feeds pending raw input, lets the pointer settle, runs the attractor."""
         with self.lock:
+            self._capture_ml_raw(t)  # Preserve real idle intervals without polling the smoothed cursor.
+            self._expire_ml(t)
             if not self.owns_cursor or self.raw is None or self.out is None:
                 self._last_tick = t
                 return False

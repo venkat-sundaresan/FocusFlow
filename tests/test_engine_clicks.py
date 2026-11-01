@@ -6,6 +6,9 @@ import time
 import unittest
 from unittest import mock
 
+if sys.platform != "win32":
+    raise unittest.SkipTest("engine click integration requires Windows APIs")
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from focusflow import profiles, winapi
