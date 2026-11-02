@@ -1,4 +1,4 @@
-# FocusFlow
+# FocusFlow V1
 
 A Windows accessibility assistant for hand tremor and shaky mouse control. It sits between your mouse and Windows,
 steadies the **real pointer**, helps you land on the control you meant, and clicks for you when you hover — and it
