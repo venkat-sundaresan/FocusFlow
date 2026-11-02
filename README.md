@@ -424,6 +424,25 @@ unambiguous misses in a row (a success clears the streak) clicks within 2 × the
 target. It never applies to text/document surfaces, is logged, shown with a thicker outline, and is undone from
 Pointer Assist.
 
+## Calibrate to my hand
+
+**Adaptive Profiles → Calibrate to my hand** runs a one-minute check and suggests a profile:
+
+1. **Hold still** - rest the pointer on a ring for 8 seconds with all assistance masked off, so the recording is of
+   the unassisted hand. Slow drift is removed; what remains is the wander.
+2. **Click ten targets** (skippable if clicking is hard, which turns dwell clicking on instead).
+
+The hold recording is replayed through the real `AdaptivePointer` filter at strengths 3-9, and the weakest strength
+that leaves at most ~35% of the wander (never less than 0.8 px, the filter's dead-band) is suggested. Missed clicks size
+the hit area (1.25 x the 90th-percentile miss distance, 16-56 px) and switch near-miss correction on at a 10% miss
+rate; clicks repeated within 0.15 s switch the repeat-click guard on. Dwell time follows the residual wander
+(1.5 / 2.5 / 4 s). Nothing is saved until you press Save; it is then stored as the custom profile "My calibration".
+
+This is a **heuristic starting point**, not a clinical measurement, and the rules above have not been validated
+on people with tremor. Tune the result in Pointer Assist and the Live Lab. Logic: `focusflow/calibration.py`
+(pure, `tests/test_calibration.py`); window: `focusflow/calibration_ui.py` (`tests/test_calibration_ui.py`, needs Tk
+and a display, e.g. `xvfb-run -a python -m unittest tests.test_calibration_ui`).
+
 ## Experiments and analytics
 
 Live Lab → pick a mode → **Start task**: ten activations in a fixed route over five numbered targets, using your real

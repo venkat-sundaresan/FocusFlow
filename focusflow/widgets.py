@@ -132,6 +132,12 @@ class Panel:
     def destroy(self):
         self.ui.local.clear(self.name)
         if self.win is not None and self.win.winfo_exists():
+            if self._job is not None:                      # a pending publish timer must not outlive its window
+                try:
+                    self.win.after_cancel(self._job)
+                except tk.TclError:
+                    pass
+                self._job = None
             self.win.destroy()
         self.win = None
         self._reg = []

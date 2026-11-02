@@ -182,10 +182,18 @@ class ProfilesPage(Page):
         self.cards.grid(row=1, column=0, sticky="ew")
         for i in range(3):
             self.cards.grid_columnconfigure(i, weight=1, uniform="p")
+        cc, ci = card(self, "Calibrate to my hand",
+                      "A one-minute check: rest on a ring, then click ten targets. FocusFlow replays your own movement "
+                      "through its filter and suggests smoothing, dwell time and hit-area size. Nothing is saved "
+                      "until you say so.", wrap=520)
+        cc.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        cb = Btn(ci, "Start calibration", self.start_calibration, "primary", 11, 18, 7)
+        cb.pack(anchor="w", pady=(10, 0))
+        self.win.reg(cb, "Start calibration", self.start_calibration)
         sc, si = card(self, "Save current settings as a custom profile",
                       "Tune Pointer Assist the way you like, name it, and it appears above. (Typing a name needs the "
                       "keyboard — or use the on-screen keyboard.)")
-        sc.grid(row=2, column=0, sticky="ew", pady=(14, 0))
+        sc.grid(row=3, column=0, sticky="ew", pady=(14, 0))
         line = tk.Frame(si, bg=CARD)
         line.pack(fill="x", pady=(10, 0))
         self.name_var = tk.StringVar()
@@ -198,7 +206,7 @@ class ProfilesPage(Page):
         rc, ri = card(self, "Application-specific profiles",
                       "When one of these applications is in front, its profile applies automatically; your chosen "
                       "profile returns when you leave it.")
-        rc.grid(row=3, column=0, sticky="ew", pady=(14, 0))
+        rc.grid(row=4, column=0, sticky="ew", pady=(14, 0))
         self.rules = tk.Frame(ri, bg=CARD)
         self.rules.pack(fill="x", pady=(8, 0))
         arow = tk.Frame(ri, bg=CARD)
@@ -208,6 +216,9 @@ class ProfilesPage(Page):
         self.win.reg(self.add_btn, "Add application rule", self.begin_capture)
         self._sig = None
         self._capturing = False
+
+    def start_calibration(self):
+        self.app.ui.calibration.start()
 
     def save(self):
         name = profiles.save_custom(self.cfg, self.name_var.get())

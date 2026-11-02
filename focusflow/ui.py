@@ -8,6 +8,7 @@ from .pages import (AccessibilityPage, AnalyticsPage, LabPage, PointerAssistPage
 from .targets import LocalTargets
 from .widgets import (ACCENT, ACCENT_DK, AMBER, BG, BORDER, CARD, CARD2, FAINT, FG, MUTED, SIDEBAR, Btn, Panel, font,
                       pill, px)
+from .calibration_ui import CalibrationWindow
 from .windows import KeyboardWindow, Overlay, Prompt, TaskWindow, toast
 
 NAV = (("assist", "Pointer Assist", "◎", PointerAssistPage),
@@ -206,6 +207,7 @@ class UI:
         self.local.dispatch = self.call
         self.main = MainWindow(self)
         self.prompt, self.keyboard, self.task = Prompt(self), KeyboardWindow(self), TaskWindow(self)
+        self.calibration = CalibrationWindow(self)
         self.overlay = None
         self.root.after(40, self._pump)
 
